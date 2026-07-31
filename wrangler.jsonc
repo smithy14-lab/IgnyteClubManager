@@ -1,6 +1,7 @@
 {
   // Cloudflare Workers config: serve the built Astro site as static assets.
   "name": "ignyte-club-manager",
+  "account_id": "8d447df562d0c3b0ecd30f5b863ce617",
   "compatibility_date": "2026-07-01",
   "assets": {
     "directory": "./dist",
