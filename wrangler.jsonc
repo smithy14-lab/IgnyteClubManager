@@ -1,10 +1,13 @@
 {
-  // Cloudflare Workers config: serve the built Astro site as static assets.
+  // Cloudflare Workers config: static Astro site + a tiny worker that
+  // rewrites /c/{slug} to the club portal page.
   "name": "ignyte-club-manager",
   "account_id": "8d447df562d0c3b0ecd30f5b863ce617",
   "compatibility_date": "2026-07-01",
+  "main": "src/worker.js",
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     "html_handling": "auto-trailing-slash"
   }
 }

@@ -3,33 +3,33 @@ import AppLayout from '../layouts/AppLayout.astro';
 
 const tiers = [
   {
-    name: 'Founding Club',
-    price: 'Free',
-    sub: 'while in early access',
-    highlight: true,
+    name: 'Free',
+    price: '£0',
+    sub: 'everything a small club needs to run privates',
+    highlight: false,
     features: [
       'Unlimited coaches, families & athletes',
       'Booking, waiting lists & weekly slots',
       'Skill journeys, badges & milestone alerts',
       'Registers + Excel coach-pay export',
       'Credits & makeup tokens',
-      'Broadcasts, locations & admin tools',
-      'Direct line to the builders',
+      'Your own club page & join code',
     ],
-    cta: ['Become a founding club', '/contact'],
+    cta: ['Start free — set up in minutes', '/start'],
   },
   {
     name: 'Club',
     price: '£29/mo',
-    sub: 'when early access ends — founding clubs keep a lifetime discount',
-    highlight: false,
+    sub: 'for clubs that want their own look and priority help',
+    highlight: true,
     features: [
-      'Everything in Founding Club',
+      'Everything in Free',
+      'Your branding — colours & logo everywhere',
       'Email notifications for families',
       'Priority support',
-      'Your club branding',
+      'Early access to new features',
     ],
-    cta: ['Register interest', '/contact'],
+    cta: ['Start free, upgrade any time', '/start'],
   },
 ];
 ---

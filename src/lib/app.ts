@@ -1,6 +1,7 @@
 import { supabase, supabaseConfigured } from './supabase';
 
 export type Role = 'parent' | 'athlete' | 'coach' | 'admin' | 'owner';
+export type ClubRole = 'parent' | 'athlete' | 'coach' | 'admin';
 
 export interface Profile {
   id: string;
@@ -8,6 +9,39 @@ export interface Profile {
   email: string;
   phone: string | null;
   role: Role;
+  last_club_id: string | null;
+}
+
+export interface Membership {
+  club_id: string;
+  role: ClubRole;
+  status: 'active' | 'pending' | 'removed';
+  clubs: {
+    id: string;
+    name: string;
+    slug: string;
+    status: string;
+    plan: string;
+    logo_path: string | null;
+    accent_color: string | null;
+  };
+}
+
+export interface ActiveClub {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  plan: string;
+  role: ClubRole | 'owner';
+  accent_color: string | null;
+  logo_path: string | null;
+}
+
+export interface AuthCtx {
+  profile: Profile;
+  memberships: Membership[];
+  club: ActiveClub | null;
 }
 
 export interface Athlete {
@@ -17,19 +51,48 @@ export interface Athlete {
   name: string;
   dob: string;
   notes: string | null;
+  medical_notes: string | null;
+  media_consent: boolean;
+}
+
+const CLUB_KEY = 'icm-active-club';
+
+export function storedClubId(): string | null {
+  return localStorage.getItem(CLUB_KEY);
+}
+
+export async function setActiveClub(clubId: string): Promise<void> {
+  localStorage.setItem(CLUB_KEY, clubId);
+  const { data } = await supabase.auth.getSession();
+  if (data.session) {
+    await supabase.from('profiles').update({ last_club_id: clubId }).eq('id', data.session.user.id);
+  }
+  // Purge cached club data so nothing bleeds across the switch.
+  if ('caches' in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k.startsWith('ignyte-data')).map((k) => caches.delete(k)));
+  }
+}
+
+export function applyClubBranding(club: ActiveClub | null): void {
+  if (club?.accent_color && club.plan !== 'free') {
+    const root = document.documentElement;
+    root.style.setProperty('--color-ignite-500', club.accent_color);
+    root.style.setProperty('--color-ignite-600', club.accent_color);
+    root.style.setProperty('--color-ignite-400', club.accent_color);
+  }
 }
 
 /**
- * Require a signed-in user on an app page. Redirects to /login when there is
- * no session (or to /setup guidance when Supabase env vars are missing).
- * Returns the user's profile.
+ * Require a signed-in user, resolve their memberships and the active club.
+ * clubRoles: which roles-in-club may view this page ('any' = any member).
+ * The platform owner passes every check; with ?club= they can enter any club.
  */
-export async function requireAuth(roles?: Role[]): Promise<Profile> {
+export async function requireAuth(clubRoles?: ClubRole[] | 'any'): Promise<AuthCtx> {
   if (!supabaseConfigured) {
     document.body.innerHTML =
       '<div style="padding:4rem 1.5rem;text-align:center;font-family:system-ui">' +
-      '<h1 style="font-size:1.4rem">Ignyte Club Manager isn’t configured yet</h1>' +
-      '<p style="margin-top:1rem;color:#9090a8">Copy <code>.env.example</code> to <code>.env</code>, add your Supabase URL and anon key, then rebuild. See the README.</p></div>';
+      '<h1 style="font-size:1.4rem">Not configured</h1><p style="margin-top:1rem;color:#9090a8">Add Supabase env vars and rebuild.</p></div>';
     throw new Error('Supabase not configured');
   }
   const { data } = await supabase.auth.getSession();
@@ -37,26 +100,87 @@ export async function requireAuth(roles?: Role[]): Promise<Profile> {
     location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
     throw new Error('redirecting');
   }
-  const { data: profile, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', data.session.user.id)
-    .single();
-  if (error || !profile) {
+  const uid = data.session.user.id;
+  const [{ data: profile }, { data: memberships }] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', uid).single(),
+    supabase
+      .from('club_members')
+      .select('club_id, role, status, clubs(id, name, slug, status, plan, logo_path, accent_color)')
+      .eq('profile_id', uid),
+  ]);
+  if (!profile) {
     await supabase.auth.signOut();
     location.href = '/login';
     throw new Error('redirecting');
   }
-  // The platform owner can go anywhere.
-  if (roles && profile.role !== 'owner' && !roles.includes(profile.role)) {
+
+  const all = (memberships ?? []) as unknown as Membership[];
+  const usable = all.filter((m) => m.status === 'active' && m.clubs?.status === 'active');
+  const isOwner = profile.role === 'owner';
+
+  // Resolve the active club: URL ?club= → stored → last → sole → null
+  let club: ActiveClub | null = null;
+  const urlClub = new URLSearchParams(location.search).get('club');
+  const pick = (id: string | null): Membership | undefined =>
+    id ? usable.find((m) => m.club_id === id) : undefined;
+  const chosen =
+    pick(urlClub) ?? pick(storedClubId()) ?? pick(profile.last_club_id) ?? (usable.length === 1 ? usable[0] : undefined);
+
+  if (chosen) {
+    club = {
+      id: chosen.club_id,
+      name: chosen.clubs.name,
+      slug: chosen.clubs.slug,
+      status: chosen.clubs.status,
+      plan: chosen.clubs.plan,
+      role: chosen.role,
+      accent_color: chosen.clubs.accent_color,
+      logo_path: chosen.clubs.logo_path,
+    };
+  } else if (isOwner && urlClub) {
+    // Owner entering a club they're not a member of (support access).
+    const { data: c } = await supabase.from('clubs').select('*').eq('id', urlClub).single();
+    if (c) {
+      club = { id: c.id, name: c.name, slug: c.slug, status: c.status, plan: c.plan, role: 'owner', accent_color: c.accent_color, logo_path: c.logo_path };
+    }
+  }
+
+  if (club) localStorage.setItem(CLUB_KEY, club.id);
+  applyClubBranding(club);
+
+  if (clubRoles) {
+    if (!club) {
+      if (isOwner) {
+        // owner without a club context heads to their console
+        if (!location.pathname.startsWith('/owner')) {
+          location.href = '/owner';
+          throw new Error('redirecting');
+        }
+      } else {
+        location.href = '/clubs';
+        throw new Error('redirecting');
+      }
+    } else if (clubRoles !== 'any' && club.role !== 'owner' && !clubRoles.includes(club.role as ClubRole)) {
+      location.href = '/dashboard';
+      throw new Error('redirecting');
+    }
+  }
+
+  return { profile: profile as Profile, memberships: all, club };
+}
+
+/** Guard for the owner console. */
+export async function requireOwner(): Promise<AuthCtx> {
+  const ctx = await requireAuth();
+  if (ctx.profile.role !== 'owner') {
     location.href = '/dashboard';
     throw new Error('redirecting');
   }
-  return profile as Profile;
+  return ctx;
 }
 
-/** Athletes the current user can book for (their children, or themself). */
-export async function myAthletes(): Promise<Athlete[]> {
+/** Athletes the current user can book for, with enrolment state for a club. */
+export async function myAthletes(clubId?: string): Promise<(Athlete & { enrolled: boolean })[]> {
   const { data: session } = await supabase.auth.getSession();
   const uid = session.session?.user.id;
   if (!uid) return [];
@@ -65,7 +189,15 @@ export async function myAthletes(): Promise<Athlete[]> {
     .select('*')
     .or(`parent_id.eq.${uid},profile_id.eq.${uid}`)
     .order('name');
-  return (data ?? []) as Athlete[];
+  const athletes = (data ?? []) as Athlete[];
+  if (!clubId || !athletes.length) return athletes.map((a) => ({ ...a, enrolled: true }));
+  const { data: enr } = await supabase
+    .from('athlete_enrolments')
+    .select('athlete_id')
+    .eq('club_id', clubId)
+    .in('athlete_id', athletes.map((a) => a.id));
+  const set = new Set((enr ?? []).map((e) => e.athlete_id));
+  return athletes.map((a) => ({ ...a, enrolled: set.has(a.id) }));
 }
 
 export function fmtDate(iso: string): string {
@@ -106,7 +238,6 @@ export function esc(s: unknown): string {
   );
 }
 
-/** Tiny toast helper — every page uses it for success/error feedback. */
 export function toast(message: string, type: 'ok' | 'err' = 'ok'): void {
   let host = document.getElementById('toast-host');
   if (!host) {
@@ -129,7 +260,6 @@ export function toast(message: string, type: 'ok' | 'err' = 'ok'): void {
   setTimeout(() => el.remove(), 4200);
 }
 
-/** Human-readable message out of a Supabase/Postgres error. */
 export function errMsg(e: unknown): string {
   const raw =
     (e as { message?: string })?.message ?? (typeof e === 'string' ? e : 'Something went wrong');

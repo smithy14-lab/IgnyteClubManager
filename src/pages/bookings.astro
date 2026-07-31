@@ -9,20 +9,23 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
+    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg, type ActiveClub } from '../lib/app';
 
     const content = document.getElementById('content')!;
+    let club: ActiveClub | null = null;
     let cancelNoticeHours = 24;
 
     async function render() {
-      await requireAuth();
-      const athletes = await myAthletes();
+      const ctx = await requireAuth('any');
+      club = ctx.club!;
+      const athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
       const ids = athletes.map((a) => a.id);
       const today = new Date().toISOString().slice(0, 10);
 
       const { data: settings } = await supabase
         .from('club_settings')
         .select('cancellation_notice_hours, cancellation_policy')
+        .eq('club_id', club.id)
         .single();
       cancelNoticeHours = settings?.cancellation_notice_hours ?? 24;
 
@@ -37,22 +40,26 @@ import AppLayout from '../layouts/AppLayout.astro';
           supabase
             .from('waitlist')
             .select('*, slots(slot_date, start_time, end_time), athletes(name), profiles!waitlist_requested_coach_id_fkey(full_name)')
+            .eq('club_id', club.id)
             .in('athlete_id', ids)
             .eq('status', 'offered'),
           supabase
             .from('waitlist')
             .select('*, slots(slot_date, start_time, end_time), athletes(name), profiles!waitlist_requested_coach_id_fkey(full_name)')
+            .eq('club_id', club.id)
             .in('athlete_id', ids)
             .eq('status', 'waiting'),
           supabase
             .from('bookings')
             .select('*, slots(slot_date, start_time, end_time), athletes(name), profiles!bookings_coach_id_fkey(full_name)')
+            .eq('club_id', club.id)
             .in('athlete_id', ids)
             .eq('status', 'booked')
             .gte('slots.slot_date', today),
           supabase
             .from('booking_series')
             .select('*, athletes(name), profiles!booking_series_coach_id_fkey(full_name)')
+            .eq('club_id', club.id)
             .in('athlete_id', ids)
             .eq('active', true),
         ]);
@@ -164,7 +171,7 @@ import AppLayout from '../layouts/AppLayout.astro';
           const ics = [
             'BEGIN:VCALENDAR',
             'VERSION:2.0',
-            'PRODID:-//Ignyte Club Manager//EN',
+            `PRODID:-//${club?.name ?? 'Ignyte Club Manager'}//EN`,
             'BEGIN:VEVENT',
             `UID:${d}${start.replace(':', '')}-${athlete.replace(/\W/g, '')}@ignyte`,
             `DTSTART:${d}T${start.replace(':', '')}00`,
@@ -231,6 +238,7 @@ import AppLayout from '../layouts/AppLayout.astro';
           if (b.dataset.anycoach) {
             // "Any coach" entry — find a free coach in the slot to book with.
             const { data: board } = await supabase.rpc('get_slot_board', {
+              p_club: club!.id,
               p_from: '1970-01-01',
               p_to: '2100-01-01',
             });

@@ -102,7 +102,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
+    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg, type ActiveClub } from '../lib/app';
     import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../lib/calendar';
 
     type Coach = {
@@ -132,6 +132,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       return bits.length ? `${c.name} (${bits.join(' · ')})` : c.name;
     }
 
+    let club: ActiveClub | null = null;
     let slots: Slot[] = [];
     let athletes: Awaited<ReturnType<typeof myAthletes>> = [];
     let policyText = '';
@@ -159,6 +160,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
     async function load() {
       const { data, error } = await supabase.rpc('get_slot_board', {
+        p_club: club!.id,
         p_from: fFrom.value,
         p_to: fTo.value,
       });
@@ -234,6 +236,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       const y = calCursor.getFullYear();
       const m = calCursor.getMonth();
       const { data, error } = await supabase.rpc('get_slot_board', {
+        p_club: club!.id,
         p_from: `${y}-${String(m + 1).padStart(2, '0')}-01`,
         p_to: isoDate(new Date(y, m + 1, 0)),
       });
@@ -476,15 +479,20 @@ import AppLayout from '../layouts/AppLayout.astro';
     );
 
     (async () => {
-      await requireAuth();
-      athletes = await myAthletes();
-      const { data: settings } = await supabase.from('club_settings').select('cancellation_policy').single();
+      const ctx = await requireAuth('any');
+      club = ctx.club!;
+      athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
+      const { data: settings } = await supabase
+        .from('club_settings')
+        .select('cancellation_policy')
+        .eq('club_id', club.id)
+        .single();
       policyText = settings?.cancellation_policy ?? '';
-      const { data: session } = await supabase.auth.getSession();
       const { data: ledger } = await supabase
         .from('credit_ledger')
         .select('delta')
-        .eq('profile_id', session.session?.user.id ?? '');
+        .eq('club_id', club.id)
+        .eq('profile_id', ctx.profile.id);
       creditBalance = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
       renderToggle();
       await load();

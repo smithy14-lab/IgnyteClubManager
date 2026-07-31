@@ -12,6 +12,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
     <button data-tab="people" class="tab-btn btn btn-ghost btn-sm">People</button>
     <button data-tab="broadcasts" class="tab-btn btn btn-ghost btn-sm">Messages</button>
     <button data-tab="locations" class="tab-btn btn btn-ghost btn-sm">Locations</button>
+    <button data-tab="branding" class="tab-btn btn btn-ghost btn-sm">Branding</button>
     <button data-tab="skills" class="tab-btn btn btn-ghost btn-sm">Skills</button>
     <button data-tab="export" class="tab-btn btn btn-ghost btn-sm">Export</button>
     <button data-tab="settings" class="tab-btn btn btn-ghost btn-sm">Settings</button>
@@ -23,8 +24,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
     import { supabase } from '../../lib/supabase';
     import { requireAuth, fmtDate, fmtTime, esc, toast, errMsg } from '../../lib/app';
     import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../../lib/calendar';
+    import type { AuthCtx } from '../../lib/app';
 
     const content = document.getElementById('content')!;
+    let ctx: AuthCtx;
+    let clubId = '';
     let tab = 'slots';
     type Loc = { id: string; name: string; address: string | null; active: boolean };
     let locations: Loc[] = [];
@@ -39,7 +43,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
     );
 
     async function loadLocations() {
-      const { data } = await supabase.from('locations').select('*').order('created_at');
+      const { data } = await supabase.from('locations').select('*').eq('club_id', clubId).order('created_at');
       locations = (data ?? []) as Loc[];
     }
 
@@ -51,6 +55,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       else if (tab === 'people') await renderPeople();
       else if (tab === 'broadcasts') await renderBroadcasts();
       else if (tab === 'locations') await renderLocations();
+      else if (tab === 'branding') await renderBranding();
       else if (tab === 'skills') await renderSkills();
       else if (tab === 'export') await renderExport();
       else await renderSettings();
@@ -85,6 +90,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const y = calCursor.getFullYear();
       const m = calCursor.getMonth();
       const { data: board } = await supabase.rpc('get_slot_board', {
+        p_club: clubId,
         p_from: `${y}-${String(m + 1).padStart(2, '0')}-01`,
         p_to: isoDate(new Date(y, m + 1, 0)),
       });
@@ -125,6 +131,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const toD = new Date();
       toD.setDate(toD.getDate() + 56);
       const { data: board } = await supabase.rpc('get_slot_board', {
+        p_club: clubId,
         p_from: from,
         p_to: toD.toISOString().slice(0, 10),
       });
@@ -228,6 +235,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       (document.getElementById('slot-form') as HTMLFormElement).addEventListener('submit', async (e) => {
         e.preventDefault();
         const { data, error } = await supabase.rpc('admin_create_slots', {
+          p_club: clubId,
           p_date: (document.getElementById('s-date') as HTMLInputElement).value,
           p_start: (document.getElementById('s-start') as HTMLInputElement).value,
           p_capacity: Number((document.getElementById('s-cap') as HTMLInputElement).value),
@@ -290,7 +298,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
           .select('*, athletes(name), profiles!waitlist_requested_coach_id_fkey(full_name)')
           .eq('slot_id', slotId)
           .in('status', ['waiting', 'offered']),
-        supabase.from('athletes').select('id, name').order('name'),
+        supabase.from('athlete_enrolments').select('athlete_id, athletes(id, name)').eq('club_id', clubId),
       ]);
 
       panel.innerHTML = `
@@ -324,7 +332,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         <p class="text-xs font-semibold text-mist-300 mt-3 mb-1">Manually add a booking</p>
         <div class="flex flex-wrap gap-2">
           <select class="field !w-auto !py-1 !text-xs" data-add-athlete>
-            ${(athletes ?? []).map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+            ${(athletes ?? []).map((a) => { const at = a.athletes as unknown as { id: string; name: string }; return `<option value="${at?.id}">${esc(at?.name)}</option>`; }).join('')}
           </select>
           <select class="field !w-auto !py-1 !text-xs" data-add-coach>
             ${slot.coaches.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
@@ -376,6 +384,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         const { data, error } = await supabase
           .from('bookings')
           .select('*, slots!inner(slot_date, start_time, end_time, locations(name)), athletes(name), profiles!bookings_coach_id_fkey(full_name)')
+          .eq('club_id', clubId)
           .gte('slots.slot_date', (document.getElementById('b-from') as HTMLInputElement).value)
           .lte('slots.slot_date', (document.getElementById('b-to') as HTMLInputElement).value);
         if (error) return toast(errMsg(error), 'err');
@@ -436,8 +445,8 @@ import AppLayout from '../../layouts/AppLayout.astro';
     // ============================ BROADCASTS ============================
     async function renderBroadcasts() {
       const [{ data: sent }, { data: readCounts }] = await Promise.all([
-        supabase.from('broadcasts').select('*').order('created_at', { ascending: false }).limit(30),
-        supabase.rpc('broadcast_read_counts'),
+        supabase.from('broadcasts').select('*').eq('club_id', clubId).order('created_at', { ascending: false }).limit(30),
+        supabase.rpc('broadcast_read_counts', { p_club: clubId }),
       ]);
       const reads = (readCounts ?? {}) as Record<string, number>;
       content.innerHTML = `
@@ -481,6 +490,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         const body = (document.getElementById('bc-body') as HTMLTextAreaElement).value.trim();
         if (!title || !body) return toast('Title and message are required.', 'err');
         const { data, error } = await supabase.rpc('admin_broadcast', {
+          p_club: clubId,
           p_audience: (document.getElementById('bc-aud') as HTMLSelectElement).value,
           p_title: title,
           p_body: body,
@@ -493,22 +503,77 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     // ============================ PEOPLE ============================
     async function renderPeople() {
-      const [{ data: users }, { data: coachProfiles }, { data: ledger }] = await Promise.all([
-        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-        supabase.from('coach_profiles').select('*'),
-        supabase.from('credit_ledger').select('profile_id, delta'),
+      const [{ data: members }, { data: coachProfiles }, { data: ledger }, { data: invites }] = await Promise.all([
+        supabase
+          .from('club_members')
+          .select('profile_id, role, status, created_at, profiles(id, full_name, email, phone)')
+          .eq('club_id', clubId)
+          .neq('status', 'removed')
+          .order('created_at', { ascending: false }),
+        supabase.from('coach_profiles').select('*').eq('club_id', clubId),
+        supabase.from('credit_ledger').select('profile_id, delta').eq('club_id', clubId),
+        supabase.from('club_invites').select('*').eq('club_id', clubId).eq('revoked', false).is('used_by', null),
       ]);
       const cpMap = new Map((coachProfiles ?? []).map((c) => [c.coach_id, c]));
       const creditMap = new Map<string, number>();
       (ledger ?? []).forEach((r) => creditMap.set(r.profile_id, (creditMap.get(r.profile_id) ?? 0) + r.delta));
+      const pending = (members ?? []).filter((m) => m.status === 'pending');
+      const active = (members ?? []).filter((m) => m.status === 'active');
+      const liveInvites = (invites ?? []).filter((i) => new Date(i.expires_at) > new Date());
 
       content.innerHTML = `
+        ${
+          pending.length
+            ? `<div class="surface-card p-5 mb-5 border-ignite-500/40">
+                <h2 class="text-base font-semibold text-ignite-400 mb-2">⏳ Join requests</h2>
+                ${pending
+                  .map(
+                    (m) => `
+                  <div class="py-2.5 border-t border-ink-700 first:border-0 flex flex-wrap items-center justify-between gap-2">
+                    <div><p class="text-sm font-medium">${esc((m.profiles as unknown as { full_name: string })?.full_name)}</p>
+                    <p class="text-xs text-mist-500">${esc((m.profiles as unknown as { email: string })?.email)}</p></div>
+                    <div class="flex gap-1.5">
+                      <button class="btn btn-primary btn-sm" data-approve="${m.profile_id}">Approve</button>
+                      <button class="btn btn-danger btn-sm" data-decline="${m.profile_id}">Decline</button>
+                    </div>
+                  </div>`
+                  )
+                  .join('')}
+              </div>`
+            : ''
+        }
+        <div class="surface-card p-5 mb-5">
+          <h2 class="text-base font-semibold mb-1">Invite staff</h2>
+          <p class="text-xs text-mist-500 mb-3">Coaches and admins can only join by invitation. Send the link however you like.</p>
+          <div class="flex flex-wrap gap-2">
+            <input class="field flex-1 min-w-[10rem]" id="inv-email" type="email" placeholder="Email (optional — locks the invite to them)" />
+            <select class="field !w-auto" id="inv-role"><option value="coach">Coach</option><option value="admin">Admin</option></select>
+            <button class="btn btn-primary btn-sm" id="inv-create">Create invite</button>
+          </div>
+          ${
+            liveInvites.length
+              ? `<div class="mt-3">${liveInvites
+                  .map(
+                    (i) => `
+                <div class="py-2 border-t border-ink-700 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span>${i.role} invite${i.email ? ' for ' + esc(i.email) : ''} · expires ${new Date(i.expires_at).toLocaleDateString()}</span>
+                  <span class="flex gap-1.5">
+                    <button class="btn btn-ghost btn-sm" data-copy="${i.id}">Copy link</button>
+                    <button class="btn btn-danger btn-sm" data-revoke="${i.id}">Revoke</button>
+                  </span>
+                </div>`
+                  )
+                  .join('')}</div>`
+              : ''
+          }
+        </div>
         <div class="surface-card p-5">
-          <h2 class="text-base font-semibold mb-1">Accounts</h2>
-          <p class="text-xs text-mist-500 mb-3">Change roles here. Coaches get a profile — set their disciplines, levels, cost and booking cut-offs.</p>
-          ${(users ?? [])
-            .map((u) => {
-              const cp = cpMap.get(u.id);
+          <h2 class="text-base font-semibold mb-1">Members</h2>
+          <p class="text-xs text-mist-500 mb-3">Roles apply to this club only. Removing someone keeps their account — they may belong to other clubs.</p>
+          ${active
+            .map((m) => {
+              const cp = cpMap.get(m.profile_id);
+              const u = m.profiles as unknown as { full_name: string; email: string; phone: string | null };
               return `
             <div class="py-3 border-t border-ink-700">
               <div class="flex flex-wrap items-center justify-between gap-2">
@@ -517,17 +582,18 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   <p class="text-xs text-mist-500">${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}</p>
                 </div>
                 <div class="flex gap-2 items-center flex-wrap">
-                  ${['parent', 'athlete'].includes(u.role) ? `<span class="pill ${creditMap.get(u.id) ? 'pill-accent' : ''}">💳 ${creditMap.get(u.id) ?? 0}</span>
-                    <button class="btn btn-ghost btn-sm" data-credits="${u.id}" data-name="${esc(u.full_name)}">Credits</button>` : ''}
-                  <select class="field !w-auto !py-1 !text-xs" data-user="${u.id}">
-                    ${['parent', 'athlete', 'coach', 'admin'].map((r) => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${r}</option>`).join('')}
+                  ${['parent', 'athlete'].includes(m.role) ? `<span class="pill ${creditMap.get(m.profile_id) ? 'pill-accent' : ''}">💳 ${creditMap.get(m.profile_id) ?? 0}</span>
+                    <button class="btn btn-ghost btn-sm" data-credits="${m.profile_id}" data-name="${esc(u.full_name)}">Credits</button>` : ''}
+                  <select class="field !w-auto !py-1 !text-xs" data-user="${m.profile_id}">
+                    ${['parent', 'athlete', 'coach', 'admin'].map((r) => `<option value="${r}" ${r === m.role ? 'selected' : ''}>${r}</option>`).join('')}
                   </select>
-                  ${u.role === 'coach' ? `<button class="btn btn-ghost btn-sm" data-coach-edit="${u.id}">Coach profile</button>` : ''}
+                  ${m.role === 'coach' ? `<button class="btn btn-ghost btn-sm" data-coach-edit="${m.profile_id}">Coach profile</button>` : ''}
+                  <button class="btn btn-danger btn-sm" data-remove-member="${m.profile_id}">Remove</button>
                 </div>
               </div>
               ${
-                u.role === 'coach'
-                  ? `<div class="coach-editor hidden mt-3 p-3 rounded-lg bg-ink-900 border border-ink-700" data-editor="${u.id}">
+                m.role === 'coach'
+                  ? `<div class="coach-editor hidden mt-3 p-3 rounded-lg bg-ink-900 border border-ink-700" data-editor="${m.profile_id}">
                     <div class="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label class="form-label">Disciplines</label>
@@ -539,7 +605,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
                       <div><label class="form-label">Booking cut-off (mins before)</label><input class="field !py-1.5 !text-sm" type="number" min="0" data-f="notice" value="${cp?.booking_notice_mins ?? 120}" /></div>
                       <div><label class="form-label">Cut-off with adjacent lesson (mins)</label><input class="field !py-1.5 !text-sm" type="number" min="0" data-f="adjacent" value="${cp?.booking_notice_adjacent_mins ?? 15}" /></div>
                     </div>
-                    <button class="btn btn-primary btn-sm mt-3" data-coach-save="${u.id}">Save coach profile</button>
+                    <button class="btn btn-primary btn-sm mt-3" data-coach-save="${m.profile_id}">Save coach profile</button>
                   </div>`
                   : ''
               }
@@ -548,12 +614,62 @@ import AppLayout from '../../layouts/AppLayout.astro';
             .join('')}
         </div>`;
 
+      content.querySelectorAll<HTMLButtonElement>('[data-approve]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { error } = await supabase.rpc('approve_member', { p_club: clubId, p_profile: b.dataset.approve, p_approve: true });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Approved — they can book now.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-decline]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { error } = await supabase.rpc('approve_member', { p_club: clubId, p_profile: b.dataset.decline, p_approve: false });
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+      document.getElementById('inv-create')?.addEventListener('click', async () => {
+        const { data, error } = await supabase.rpc('create_club_invite', {
+          p_club: clubId,
+          p_role: (document.getElementById('inv-role') as HTMLSelectElement).value,
+          p_email: (document.getElementById('inv-email') as HTMLInputElement).value || null,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        const link = `${location.origin}/invite?i=${data}`;
+        await navigator.clipboard.writeText(link).catch(() => {});
+        toast('Invite created — link copied to your clipboard.');
+        render();
+      });
+      content.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          await navigator.clipboard.writeText(`${location.origin}/invite?i=${b.dataset.copy}`);
+          toast('Link copied.');
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-revoke]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { error } = await supabase.rpc('revoke_club_invite', { p_invite: b.dataset.revoke });
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-remove-member]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Remove this member from the club? Their account and any other clubs are unaffected.')) return;
+          const { error } = await supabase.rpc('remove_member', { p_club: clubId, p_profile: b.dataset.removeMember });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Member removed.');
+          render();
+        })
+      );
       content.querySelectorAll<HTMLButtonElement>('[data-credits]').forEach((b) =>
         b.addEventListener('click', async () => {
           const amount = prompt(`Adjust lesson credits for ${b.dataset.name} (e.g. 10 to add a 10-pack, -2 to remove two):`);
           if (!amount || !Number(amount)) return;
           const reason = prompt('Reason (shown to the family):', Number(amount) > 0 ? 'Lesson pack purchased' : 'Adjustment') ?? 'Adjustment';
           const { data, error } = await supabase.rpc('admin_adjust_credits', {
+            p_club: clubId,
             p_profile: b.dataset.credits,
             p_delta: Number(amount),
             p_reason: reason,
@@ -565,7 +681,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       );
       content.querySelectorAll<HTMLSelectElement>('[data-user]').forEach((sel) =>
         sel.addEventListener('change', async () => {
-          const { error } = await supabase.from('profiles').update({ role: sel.value }).eq('id', sel.dataset.user);
+          const { error } = await supabase.rpc('set_member_role', { p_club: clubId, p_profile: sel.dataset.user, p_role: sel.value });
           if (error) return toast(errMsg(error), 'err');
           toast('Role updated.');
           render();
@@ -584,6 +700,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
           const disciplines = [checked('tumble') && 'tumble', checked('dance') && 'dance'].filter(Boolean);
           if (!disciplines.length) return toast('Pick at least one discipline.', 'err');
           const { error } = await supabase.from('coach_profiles').upsert({
+            club_id: clubId,
             coach_id: b.dataset.coachSave,
             disciplines,
             levels: val('levels') || null,
@@ -596,6 +713,76 @@ import AppLayout from '../../layouts/AppLayout.astro';
           toast('Coach profile saved.');
         })
       );
+    }
+
+    // ============================ BRANDING ============================
+    async function renderBranding() {
+      const { data: c } = await supabase.from('clubs').select('*').eq('id', clubId).single();
+      const isFree = c?.plan === 'free';
+      content.innerHTML = `
+        <div class="surface-card p-5 max-w-xl">
+          <h2 class="text-base font-semibold mb-4">Branding & joining</h2>
+          <div class="flex flex-col gap-4">
+            <div>
+              <label class="form-label" for="br-name">Club name</label>
+              <input class="field" id="br-name" value="${esc(c?.name ?? '')}" maxlength="60" />
+            </div>
+            <div>
+              <label class="form-label" for="br-blurb">Short blurb (shown on your public page)</label>
+              <textarea class="field" id="br-blurb" rows="2" maxlength="200">${esc(c?.blurb ?? '')}</textarea>
+            </div>
+            <div>
+              <label class="form-label" for="br-accent">Accent colour ${isFree ? '<span class="pill pill-warn ml-1">Club plan</span>' : ''}</label>
+              <input type="color" id="br-accent" value="${c?.accent_color ?? '#ff6a1a'}" ${isFree ? 'disabled' : ''} class="h-9 w-16 rounded border border-ink-600 bg-ink-900" />
+            </div>
+            <div>
+              <label class="form-label">Your public portal</label>
+              <p class="text-sm"><code class="text-ignite-400">${location.origin}/c/${esc(c?.slug ?? '')}</code>
+                <button class="btn btn-ghost btn-sm ml-2" id="br-copy-link">Copy</button></p>
+            </div>
+            <div>
+              <label class="form-label">Instant-join code</label>
+              <p class="text-sm"><code class="text-ignite-400 text-lg">${esc(c?.join_code ?? '')}</code>
+                <button class="btn btn-ghost btn-sm ml-2" id="br-copy-code">Copy</button>
+                <button class="btn btn-danger btn-sm ml-1" id="br-rotate">Regenerate</button></p>
+              <p class="text-xs text-mist-500 mt-1">Anyone with this code joins instantly. Without it, people request to join and you approve them here. Regenerating kills the old code immediately.</p>
+            </div>
+            <label class="text-sm text-mist-300 flex gap-2 items-start">
+              <input type="checkbox" id="br-search" ${c?.searchable ? 'checked' : ''} class="mt-1" />
+              <span>Show my club in search and allow join requests</span>
+            </label>
+            <button class="btn btn-primary" id="br-save">Save branding</button>
+          </div>
+        </div>`;
+
+      document.getElementById('br-copy-link')?.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(`${location.origin}/c/${c?.slug}`);
+        toast('Portal link copied.');
+      });
+      document.getElementById('br-copy-code')?.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(c?.join_code ?? '');
+        toast('Code copied.');
+      });
+      document.getElementById('br-rotate')?.addEventListener('click', async () => {
+        if (!confirm('Regenerate the join code? The old one stops working immediately (update any posters).')) return;
+        const { data, error } = await supabase.rpc('rotate_join_code', { p_club: clubId });
+        if (error) return toast(errMsg(error), 'err');
+        toast(`New code: ${data}`);
+        render();
+      });
+      document.getElementById('br-save')?.addEventListener('click', async () => {
+        const accentEl = document.getElementById('br-accent') as HTMLInputElement;
+        const { error } = await supabase.rpc('update_club_branding', {
+          p_club: clubId,
+          p_name: (document.getElementById('br-name') as HTMLInputElement).value,
+          p_blurb: (document.getElementById('br-blurb') as HTMLTextAreaElement).value,
+          p_accent: accentEl.disabled ? null : accentEl.value,
+          p_logo_path: null,
+          p_searchable: (document.getElementById('br-search') as HTMLInputElement).checked,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Branding saved.');
+      });
     }
 
     // ============================ LOCATIONS ============================
@@ -643,7 +830,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       document.getElementById('loc-add')?.addEventListener('click', async () => {
         const name = (document.getElementById('loc-new') as HTMLInputElement).value.trim();
         if (!name) return;
-        const { error } = await supabase.from('locations').insert({ name });
+        const { error } = await supabase.from('locations').insert({ club_id: clubId, name });
         if (error) return toast(errMsg(error), 'err');
         toast('Location added.');
         render();
@@ -652,7 +839,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     // ============================ SKILLS ============================
     async function renderSkills() {
-      const { data: skills } = await supabase.from('skills').select('*').order('sort');
+      const { data: skills } = await supabase.from('skills').select('*').eq('club_id', clubId).order('sort');
       const groups = new Map<string, NonNullable<typeof skills>>();
       (skills ?? []).forEach((s) => {
         const key = `${s.discipline === 'tumble' ? 'Tumble' : 'All-star dance'} — ${s.category}`;
@@ -692,6 +879,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         const cat = (document.getElementById('sk-cat') as HTMLInputElement).value.trim();
         if (!name || !cat) return toast('Category and name are required.', 'err');
         const { error } = await supabase.from('skills').insert({
+          club_id: clubId,
           discipline: (document.getElementById('sk-disc') as HTMLSelectElement).value,
           category: cat,
           name,
@@ -741,9 +929,10 @@ import AppLayout from '../../layouts/AppLayout.astro';
             supabase
               .from('bookings')
               .select('*, slots!inner(slot_date, start_time, end_time, locations(name)), athletes(name, parent_id), profiles!bookings_coach_id_fkey(full_name)')
+              .eq('club_id', clubId)
               .gte('slots.slot_date', from)
               .lte('slots.slot_date', to),
-            supabase.from('coach_profiles').select('coach_id, rate_per_lesson'),
+            supabase.from('coach_profiles').select('coach_id, rate_per_lesson').eq('club_id', clubId),
           ]);
           if (error) throw error;
 
@@ -811,15 +1000,12 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     // ============================ SETTINGS ============================
     async function renderSettings() {
-      const { data: s } = await supabase.from('club_settings').select('*').single();
+      const { data: s } = await supabase.from('club_settings').select('*').eq('club_id', clubId).single();
       content.innerHTML = `
         <div class="surface-card p-5 max-w-xl">
           <h2 class="text-base font-semibold mb-4">Club settings</h2>
           <form id="settings-form" class="flex flex-col gap-4">
-            <div>
-              <label class="form-label" for="c-name">Club name</label>
-              <input class="field" id="c-name" value="${esc(s?.club_name)}" required />
-            </div>
+
             <div>
               <label class="form-label" for="c-notice">Cancellation notice (hours)</label>
               <input class="field" id="c-notice" type="number" min="0" max="168" value="${s?.cancellation_notice_hours ?? 24}" required />
@@ -843,23 +1029,23 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
       (document.getElementById('settings-form') as HTMLFormElement).addEventListener('submit', async (e) => {
         e.preventDefault();
-        const { error } = await supabase
-          .from('club_settings')
-          .update({
-            club_name: (document.getElementById('c-name') as HTMLInputElement).value,
-            cancellation_notice_hours: Number((document.getElementById('c-notice') as HTMLInputElement).value),
-            cancellation_policy: (document.getElementById('c-policy') as HTMLTextAreaElement).value,
-            waitlist_offer_hours: Number((document.getElementById('c-offer') as HTMLInputElement).value),
-            late_cancel_makeup_tokens: (document.getElementById('c-makeup') as HTMLInputElement).checked,
-          })
-          .eq('id', 1);
+        const { error } = await supabase.rpc('update_club_settings', {
+          p_club: clubId,
+          p_timezone: s?.timezone ?? 'Europe/London',
+          p_disciplines: s?.disciplines ?? ['tumble', 'dance'],
+          p_notice_hours: Number((document.getElementById('c-notice') as HTMLInputElement).value),
+          p_policy: (document.getElementById('c-policy') as HTMLTextAreaElement).value,
+          p_offer_hours: Number((document.getElementById('c-offer') as HTMLInputElement).value),
+          p_makeups: (document.getElementById('c-makeup') as HTMLInputElement).checked,
+        });
         if (error) return toast(errMsg(error), 'err');
         toast('Settings saved.');
       });
     }
 
     (async () => {
-      await requireAuth(['admin']);
+      ctx = await requireAuth(['admin']);
+      clubId = ctx.club!.id;
       await render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');

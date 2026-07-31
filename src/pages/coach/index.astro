@@ -50,9 +50,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
       skillStatusOrder,
     } from '../../lib/app';
     import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../../lib/calendar';
+    import type { ActiveClub } from '../../lib/app';
 
     const content = document.getElementById('content')!;
-    let me: Awaited<ReturnType<typeof requireAuth>>;
+    let me: { id: string };
+    let club: ActiveClub;
     let tab: 'lessons' | 'slots' | 'settings' = 'lessons';
 
     const tabLessons = document.getElementById('tab-lessons')!;
@@ -78,7 +80,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     // ---------------- My settings (coach profile + booking cut-offs) --------
     async function renderSettings() {
-      const { data: cp } = await supabase.from('coach_profiles').select('*').eq('coach_id', me.id).maybeSingle();
+      const { data: cp } = await supabase.from('coach_profiles').select('*').eq('club_id', club.id).eq('coach_id', me.id).maybeSingle();
       const disciplines: string[] = cp?.disciplines ?? ['tumble', 'dance'];
       content.innerHTML = `
         <div class="surface-card p-5 max-w-xl">
@@ -121,6 +123,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         if (!ds.length) return toast('Pick at least one discipline.', 'err');
         const rate = (document.getElementById('cs-rate') as HTMLInputElement).value;
         const { error } = await supabase.from('coach_profiles').upsert({
+          club_id: club.id,
           coach_id: me.id,
           disciplines: ds,
           levels: (document.getElementById('cs-levels') as HTMLInputElement).value || null,
@@ -146,6 +149,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const { data } = await supabase
         .from('bookings')
         .select('*, slots(slot_date, start_time, end_time, locations(name)), athletes(id, name, medical_notes, notes)')
+        .eq('club_id', club.id)
         .eq('coach_id', me.id)
         .eq('status', 'booked')
         .gte('slots.slot_date', from.toISOString().slice(0, 10));
@@ -254,6 +258,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const { data } = await supabase
         .from('bookings')
         .select('*, slots!inner(slot_date, start_time, end_time, locations(name)), athletes(id, name)')
+        .eq('club_id', club.id)
         .eq('coach_id', me.id)
         .eq('status', 'booked')
         .gte('slots.slot_date', `${y}-${String(m + 1).padStart(2, '0')}-01`)
@@ -310,7 +315,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const toD = new Date();
       toD.setDate(toD.getDate() + 28);
       const [{ data: board }, { data: mine }] = await Promise.all([
-        supabase.rpc('get_slot_board', { p_from: from, p_to: toD.toISOString().slice(0, 10) }),
+        supabase.rpc('get_slot_board', { p_club: club.id, p_from: from, p_to: toD.toISOString().slice(0, 10) }),
         supabase.from('slot_coaches').select('slot_id').eq('coach_id', me.id),
       ]);
       const mySlotIds = new Set((mine ?? []).map((r) => r.slot_id));
@@ -407,7 +412,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       progBackdrop.classList.remove('hidden');
 
       const [{ data: skills }, { data: statuses }] = await Promise.all([
-        supabase.from('skills').select('*').order('sort'),
+        supabase.from('skills').select('*').eq('club_id', club.id).order('sort'),
         supabase.from('athlete_skills').select('*').eq('athlete_id', athleteId),
       ]);
       const statusMap = new Map((statuses ?? []).map((s) => [s.skill_id, s.status]));
@@ -455,10 +460,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
       btn.disabled = true;
       btn.textContent = 'Uploading…';
       try {
-        const path = `${progAthleteId}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`;
+        const path = `${club.id}/${progAthleteId}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`;
         const { error: upErr } = await supabase.storage.from('skill-media').upload(path, file);
         if (upErr) throw upErr;
         const { error } = await supabase.rpc('add_skill_media', {
+          p_club: club.id,
           p_athlete_id: progAthleteId,
           p_path: path,
         });
@@ -477,6 +483,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const note = (document.getElementById('prog-note') as HTMLTextAreaElement).value.trim();
       if (!note) return;
       const { error } = await supabase.rpc('add_progress_note', {
+        p_club: club.id,
         p_athlete_id: progAthleteId,
         p_note: note,
         p_booking_id: progBookingId,
@@ -487,7 +494,9 @@ import AppLayout from '../../layouts/AppLayout.astro';
     });
 
     (async () => {
-      me = await requireAuth(['coach', 'admin']);
+      const ctx = await requireAuth(['coach', 'admin']);
+      me = { id: ctx.profile.id };
+      club = ctx.club!;
       await render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');

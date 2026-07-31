@@ -127,8 +127,13 @@ const appNav: [string, string, string][] = [
         >
           <div class="flex items-center gap-2 px-2 pb-4 border-b border-ink-700 mb-2">
             <IgnyteMark size={24} />
-            <span class="font-display font-semibold">Your club</span>
+            <span id="drawer-club" class="font-display font-semibold truncate">Your club</span>
             <button id="drawer-close" class="ml-auto btn btn-ghost btn-sm">✕</button>
+          </div>
+          <div id="club-switcher" class="hidden mb-2 pb-2 border-b border-ink-700">
+            <p class="px-2 pb-1 text-[0.65rem] font-semibold uppercase tracking-widest text-mist-500">Your clubs</p>
+            <div id="club-switcher-list"></div>
+            <a href="/clubs" class="drawer-link text-mist-400">➕ Join or start a club</a>
           </div>
           {appNav.map(([label, href, roles]) => (
             <a data-roles={roles} href={href} class="drawer-link hidden">{label}</a>
@@ -263,17 +268,72 @@ const appNav: [string, string, string][] = [
             document.getElementById('signin-link')?.classList.remove('hidden');
             return;
           }
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', data.session.user.id)
-            .single();
-          const role = profile?.role ?? 'parent';
+          const uid = data.session.user.id;
+          const [{ data: profile }, { data: mships }] = await Promise.all([
+            supabase.from('profiles').select('role, last_club_id').eq('id', uid).single(),
+            supabase
+              .from('club_members')
+              .select('club_id, role, status, clubs(id, name, slug, status, plan, logo_path, accent_color)')
+              .eq('profile_id', uid),
+          ]);
+          const isOwner = profile?.role === 'owner';
+          type M = { club_id: string; role: string; status: string; clubs: { name: string; status: string; plan: string; accent_color: string | null } };
+          const usable = ((mships ?? []) as unknown as M[]).filter(
+            (m) => m.status === 'active' && m.clubs?.status === 'active'
+          );
+          const stored = localStorage.getItem('icm-active-club');
+          const active =
+            usable.find((m) => m.club_id === stored) ??
+            usable.find((m) => m.club_id === profile?.last_club_id) ??
+            (usable.length === 1 ? usable[0] : undefined);
+
+          // role for nav = role in active club ('owner' opens everything)
+          const role = isOwner ? 'owner' : (active?.role ?? (usable.length ? 'parent' : 'none'));
+
+          // club branding in chrome
+          const drawerClub = document.getElementById('drawer-club');
+          if (active && drawerClub) drawerClub.textContent = active.clubs.name;
+          if (active?.clubs.accent_color && active.clubs.plan !== 'free') {
+            const root = document.documentElement;
+            root.style.setProperty('--color-ignite-500', active.clubs.accent_color);
+            root.style.setProperty('--color-ignite-600', active.clubs.accent_color);
+            root.style.setProperty('--color-ignite-400', active.clubs.accent_color);
+          }
+
+          // switcher (2+ clubs, or owner)
+          const switcher = document.getElementById('club-switcher');
+          const swList = document.getElementById('club-switcher-list');
+          if (switcher && swList && (usable.length > 1 || (isOwner && usable.length > 0))) {
+            switcher.classList.remove('hidden');
+            swList.innerHTML = usable
+              .map(
+                (m) => `
+              <button data-switch="${m.club_id}" class="drawer-link w-full text-left ${m.club_id === active?.club_id ? 'text-ignite-400' : ''}">
+                ${m.clubs.name} <span class="text-[0.65rem] text-mist-500">· ${m.role}</span>
+              </button>`
+              )
+              .join('');
+            swList.querySelectorAll<HTMLButtonElement>('[data-switch]').forEach((b) =>
+              b.addEventListener('click', async () => {
+                localStorage.setItem('icm-active-club', b.dataset.switch!);
+                await supabase.from('profiles').update({ last_club_id: b.dataset.switch }).eq('id', uid);
+                if ('caches' in window) {
+                  const keys = await caches.keys();
+                  await Promise.all(keys.filter((k) => k.startsWith('ignyte-data')).map((k) => caches.delete(k)));
+                }
+                location.href = '/dashboard';
+              })
+            );
+          }
+
           document.getElementById('drawer-btn')?.classList.remove('hidden');
           document.getElementById('openapp-link')?.classList.remove('hidden');
           document.getElementById('notif-btn')?.classList.remove('hidden');
           drawer?.querySelectorAll<HTMLElement>('[data-roles]').forEach((el) => {
-            if ((el.dataset.roles ?? '').split(',').includes(role)) el.classList.remove('hidden');
+            const roles = (el.dataset.roles ?? '').split(',');
+            if (roles.includes(role) || (role === 'owner' && !roles.includes('owner-only-never'))) {
+              el.classList.remove('hidden');
+            }
           });
 
           document.getElementById('signout-btn')?.addEventListener('click', async () => {

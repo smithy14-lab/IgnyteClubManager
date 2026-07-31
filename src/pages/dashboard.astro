@@ -9,36 +9,29 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import {
-      requireAuth,
-      myAthletes,
-      fmtDate,
-      fmtTime,
-      esc,
-      toast,
-      errMsg,
-    } from '../lib/app';
+    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
 
     const dash = document.getElementById('dash')!;
 
     async function render() {
-      const profile = await requireAuth();
+      const ctx = await requireAuth('any');
+      const club = ctx.club!;
+      const role = club.role === 'owner' ? 'admin' : club.role;
       const today = new Date().toISOString().slice(0, 10);
-      const firstName = profile.full_name.split(' ')[0];
+      const firstName = ctx.profile.full_name.split(' ')[0];
 
       let html = `
-        <p class="eyebrow">Dashboard</p>
+        <p class="eyebrow">${esc(club.name)}</p>
         <h1 class="text-2xl mt-1 mb-6">Hey, ${esc(firstName)} 👋</h1>`;
 
-      if (profile.role === 'parent' || profile.role === 'athlete') {
-        const athletes = await myAthletes();
+      if (role === 'parent' || role === 'athlete') {
+        const athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
         const athleteIds = athletes.map((a) => a.id);
 
-        // Skill progress per athlete (achieved+mastered / total skills)
         const progressMap = new Map<string, { pct: number; mastered: number; working: number }>();
         if (athleteIds.length) {
           const [{ count: totalSkills }, { data: statuses }] = await Promise.all([
-            supabase.from('skills').select('*', { count: 'exact', head: true }),
+            supabase.from('skills').select('*', { count: 'exact', head: true }).eq('club_id', club.id),
             supabase.from('athlete_skills').select('athlete_id, status').in('athlete_id', athleteIds),
           ]);
           for (const id of athleteIds) {
@@ -52,38 +45,35 @@ import AppLayout from '../layouts/AppLayout.astro';
           }
         }
 
-        // Upcoming lessons
+        const { data: ledger } = await supabase
+          .from('credit_ledger')
+          .select('delta')
+          .eq('club_id', club.id)
+          .eq('profile_id', ctx.profile.id);
+        const credits = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
+        if (credits > 0) {
+          html += `<div class="mb-4"><span class="pill pill-accent">💳 ${credits} lesson credit${credits === 1 ? '' : 's'} at ${esc(club.name)} — used automatically when you book</span></div>`;
+        }
+
         const { data: bookings } = athleteIds.length
           ? await supabase
               .from('bookings')
               .select('*, slots(slot_date, start_time, end_time), profiles!bookings_coach_id_fkey(full_name), athletes(name)')
+              .eq('club_id', club.id)
               .in('athlete_id', athleteIds)
               .eq('status', 'booked')
               .gte('slots.slot_date', today)
-              .order('created_at')
           : { data: [] };
         const upcoming = (bookings ?? [])
           .filter((b) => b.slots)
-          .sort((a, b) =>
-            (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
-          )
+          .sort((a, b) => (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time))
           .slice(0, 5);
 
-        // Lesson credit balance
-        const { data: ledger } = await supabase
-          .from('credit_ledger')
-          .select('delta')
-          .eq('profile_id', profile.id);
-        const credits = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
-        if (credits > 0) {
-          html += `<div class="mb-4"><span class="pill pill-accent">💳 ${credits} lesson credit${credits === 1 ? '' : 's'} — used automatically when you book</span></div>`;
-        }
-
-        // Waiting list offers needing action
         const { data: offers } = athleteIds.length
           ? await supabase
               .from('waitlist')
               .select('*, slots(slot_date, start_time), athletes(name)')
+              .eq('club_id', club.id)
               .in('athlete_id', athleteIds)
               .eq('status', 'offered')
           : { data: [] };
@@ -126,7 +116,7 @@ import AppLayout from '../layouts/AppLayout.astro';
           </div>
 
           <div class="surface-card p-5">
-            <h2 class="text-base font-semibold mb-3">${profile.role === 'parent' ? 'Your athletes' : 'Your progression'}</h2>
+            <h2 class="text-base font-semibold mb-3">${role === 'parent' ? 'Your athletes' : 'Your progression'}</h2>
             ${
               athletes.length
                 ? athletes
@@ -146,29 +136,24 @@ import AppLayout from '../layouts/AppLayout.astro';
                 </div>`;
                     })
                     .join('')
-                : `<p class="text-sm text-mist-500">${
-                    profile.role === 'parent'
-                      ? 'Add your athletes to start booking.'
-                      : 'No athlete record found.'
-                  }</p>`
+                : `<p class="text-sm text-mist-500">${role === 'parent' ? `No athletes at ${esc(club.name)} yet — add or enrol one.` : 'No athlete record found.'}</p>`
             }
-            ${profile.role === 'parent' ? '<a href="/athletes" class="btn btn-ghost btn-sm mt-4">Manage athletes</a>' : ''}
+            ${role === 'parent' ? '<a href="/athletes" class="btn btn-ghost btn-sm mt-4">Manage athletes</a>' : ''}
           </div>
         </div>`;
       }
 
-      if (profile.role === 'coach') {
+      if (role === 'coach') {
         const { data: myLessons } = await supabase
           .from('bookings')
           .select('*, slots(slot_date, start_time, end_time), athletes(name)')
-          .eq('coach_id', profile.id)
+          .eq('club_id', club.id)
+          .eq('coach_id', ctx.profile.id)
           .eq('status', 'booked')
           .gte('slots.slot_date', today);
         const lessons = (myLessons ?? [])
           .filter((b) => b.slots)
-          .sort((a, b) =>
-            (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
-          );
+          .sort((a, b) => (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time));
         const todays = lessons.filter((b) => b.slots.slot_date === today);
 
         html += `<div class="grid gap-4 sm:grid-cols-2">
@@ -199,12 +184,7 @@ import AppLayout from '../layouts/AppLayout.astro';
               lessons.slice(0, 6).length
                 ? lessons
                     .slice(0, 6)
-                    .map(
-                      (b) => `
-                  <div class="py-2 border-t border-ink-700 first:border-0">
-                    <p class="text-sm">${fmtDate(b.slots.slot_date)} · ${fmtTime(b.slots.start_time)} — ${esc(b.athletes?.name)}</p>
-                  </div>`
-                    )
+                    .map((b) => `<div class="py-2 border-t border-ink-700 first:border-0"><p class="text-sm">${fmtDate(b.slots.slot_date)} · ${fmtTime(b.slots.start_time)} — ${esc(b.athletes?.name)}</p></div>`)
                     .join('')
                 : '<p class="text-sm text-mist-500">No upcoming lessons.</p>'
             }
@@ -212,20 +192,24 @@ import AppLayout from '../layouts/AppLayout.astro';
         </div>`;
       }
 
-      if (profile.role === 'admin') {
-        const [{ count: slotCount }, { count: bookingCount }, { count: waitCount }, { count: userCount }] =
+      if (role === 'admin') {
+        const [{ count: slotCount }, { count: bookingCount }, { count: waitCount }, { count: memberCount }, { count: pendingCount }] =
           await Promise.all([
-            supabase.from('slots').select('*', { count: 'exact', head: true }).gte('slot_date', today),
-            supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'booked'),
-            supabase.from('waitlist').select('*', { count: 'exact', head: true }).in('status', ['waiting', 'offered']),
-            supabase.from('profiles').select('*', { count: 'exact', head: true }),
+            supabase.from('slots').select('*', { count: 'exact', head: true }).eq('club_id', club.id).gte('slot_date', today),
+            supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'booked'),
+            supabase.from('waitlist').select('*', { count: 'exact', head: true }).eq('club_id', club.id).in('status', ['waiting', 'offered']),
+            supabase.from('club_members').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'active'),
+            supabase.from('club_members').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'pending'),
           ]);
+        if ((pendingCount ?? 0) > 0) {
+          html += `<div class="surface-card p-4 mb-4 border-ignite-500/40"><p class="text-sm">⏳ <b>${pendingCount}</b> join request${pendingCount === 1 ? '' : 's'} waiting — <a class="text-ignite-400" href="/admin">approve in Admin → People</a></p></div>`;
+        }
         html += `<div class="grid gap-4 grid-cols-2 sm:grid-cols-4">
           ${[
             ['Upcoming slots', slotCount],
             ['Active bookings', bookingCount],
             ['On waiting lists', waitCount],
-            ['Accounts', userCount],
+            ['Members', memberCount],
           ]
             .map(
               ([label, n]) => `
@@ -237,8 +221,8 @@ import AppLayout from '../layouts/AppLayout.astro';
             .join('')}
         </div>
         <div class="mt-5 flex flex-wrap gap-3">
-          <a href="/admin" class="btn btn-primary">Manage slots &amp; club</a>
-          <a href="/book" class="btn btn-ghost">View timetable</a>
+          <a href="/admin" class="btn btn-primary">Manage the club</a>
+          <a href="/c/${esc(club.slug)}" class="btn btn-ghost">View public portal</a>
         </div>`;
       }
 

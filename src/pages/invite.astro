@@ -1,0 +1,56 @@
+---
+// Staff invite acceptance: /invite?i={token}
+import AppLayout from '../layouts/AppLayout.astro';
+import IgnyteMark from '../components/IgnyteMark.astro';
+---
+
+<AppLayout title="Invitation">
+  <div class="max-w-sm mx-auto py-10 text-center">
+    <IgnyteMark size={48} />
+    <div id="box" class="surface-card p-6 mt-6">
+      <p class="text-sm text-mist-500">Checking your invite…</p>
+    </div>
+  </div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { setActiveClub, esc, toast, errMsg } from '../lib/app';
+
+    const box = document.getElementById('box')!;
+    const token = new URLSearchParams(location.search).get('i');
+
+    (async () => {
+      if (!token) {
+        box.innerHTML = '<p class="text-sm text-mist-500">This invite link is incomplete.</p>';
+        return;
+      }
+      const { data } = await supabase.rpc('get_invite_public', { p_invite: token });
+      const inv = data as { club: string; role: string; valid: boolean } | null;
+      if (!inv || !inv.valid) {
+        box.innerHTML = '<h2 class="text-lg">Invite expired</h2><p class="text-sm text-mist-500 mt-2">Ask the club to send you a fresh one.</p>';
+        return;
+      }
+      const { data: session } = await supabase.auth.getSession();
+      if (!session.session) {
+        box.innerHTML = `
+          <h2 class="text-lg">You're invited! 🎉</h2>
+          <p class="text-sm text-mist-400 mt-2"><b>${esc(inv.club)}</b> invited you to join as a <b>${inv.role}</b>.</p>
+          <a class="btn btn-primary mt-4" href="/signup?next=${encodeURIComponent('/invite?i=' + token)}">Create account &amp; accept</a>
+          <p class="mt-3"><a class="text-xs text-ignite-400" href="/login?next=${encodeURIComponent('/invite?i=' + token)}">Already have an account? Sign in</a></p>`;
+        return;
+      }
+      box.innerHTML = `
+        <h2 class="text-lg">Join ${esc(inv.club)}?</h2>
+        <p class="text-sm text-mist-400 mt-2">You'll join as a <b>${inv.role}</b>.</p>
+        <button class="btn btn-primary mt-4" id="accept">Accept invitation</button>`;
+      document.getElementById('accept')?.addEventListener('click', async () => {
+        const { data: res, error } = await supabase.rpc('accept_club_invite', { p_invite: token });
+        if (error) return toast(errMsg(error), 'err');
+        const r = res as { club_id: string; role: string; name: string };
+        await setActiveClub(r.club_id);
+        toast(`Welcome to ${r.name}!`);
+        location.href = r.role === 'coach' ? '/coach' : '/admin';
+      });
+    })().catch((e) => toast(errMsg(e), 'err'));
+  </script>
+</AppLayout>

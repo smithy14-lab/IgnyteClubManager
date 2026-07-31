@@ -37,14 +37,18 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, ageFromDob, esc, toast, errMsg } from '../lib/app';
+    import { requireAuth, myAthletes, ageFromDob, esc, toast, errMsg, type AuthCtx } from '../lib/app';
 
     const list = document.getElementById('list')!;
+    let ctx: AuthCtx;
 
     async function render() {
-      const athletes = await myAthletes();
-      list.innerHTML = athletes.length
-        ? athletes
+      const club = ctx.club!;
+      const athletes = await myAthletes(club.id);
+      const here = athletes.filter((a) => a.enrolled);
+      const elsewhere = athletes.filter((a) => !a.enrolled);
+      list.innerHTML = here.length
+        ? here
             .map(
               (a) => `
         <div class="surface-card p-5" data-card="${a.id}">
@@ -76,7 +80,31 @@ import AppLayout from '../layouts/AppLayout.astro';
         </div>`
             )
             .join('')
-        : '<p class="text-sm text-mist-500 sm:col-span-2">No athletes yet — add one below to start booking lessons.</p>';
+        : `<p class="text-sm text-mist-500 sm:col-span-2">No athletes at ${esc(club.name)} yet — add one below, or enrol an existing athlete.</p>`;
+
+      if (elsewhere.length) {
+        list.innerHTML += `<div class="surface-card p-5 sm:col-span-2">
+          <h3 class="text-sm font-semibold text-mist-300 mb-2">Your athletes at other clubs</h3>
+          ${elsewhere
+            .map(
+              (a) => `
+            <div class="py-2 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+              <p class="text-sm">${esc(a.name)}</p>
+              <button class="btn btn-primary btn-sm" data-enrol="${a.id}">Enrol at ${esc(club.name)}</button>
+            </div>`
+            )
+            .join('')}
+        </div>`;
+      }
+
+      list.querySelectorAll<HTMLButtonElement>('[data-enrol]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { error } = await supabase.rpc('enrol_athlete', { p_athlete: b.dataset.enrol, p_club: club.id });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Enrolled!');
+          render();
+        })
+      );
 
       list.querySelectorAll<HTMLButtonElement>('[data-edit]').forEach((b) =>
         b.addEventListener('click', () =>
@@ -104,30 +132,46 @@ import AppLayout from '../layouts/AppLayout.astro';
       );
       list.querySelectorAll<HTMLButtonElement>('[data-remove]').forEach((b) =>
         b.addEventListener('click', async () => {
-          if (!confirm('Remove this athlete? Their bookings and progression history will be removed too.')) return;
-          const { error } = await supabase.from('athletes').delete().eq('id', b.dataset.remove);
-          if (error) return toast(errMsg(error), 'err');
-          toast('Athlete removed.');
+          const { data: enr } = await supabase
+            .from('athlete_enrolments')
+            .select('club_id')
+            .eq('athlete_id', b.dataset.remove);
+          const clubsCount = (enr ?? []).length;
+          if (clubsCount > 1) {
+            if (!confirm(`Remove this athlete from ${club.name}? They stay at their other club(s).`)) return;
+            const { error } = await supabase.rpc('unenrol_athlete', { p_athlete: b.dataset.remove, p_club: club.id });
+            if (error) return toast(errMsg(error), 'err');
+            toast('Removed from this club.');
+          } else {
+            if (!confirm('Remove this athlete completely? Their bookings and progression history will be removed too.')) return;
+            const { error: e1 } = await supabase.rpc('unenrol_athlete', { p_athlete: b.dataset.remove, p_club: club.id });
+            if (e1) return toast(errMsg(e1), 'err');
+            const { error } = await supabase.from('athletes').delete().eq('id', b.dataset.remove);
+            if (error) return toast(errMsg(error), 'err');
+            toast('Athlete removed.');
+          }
           render();
         })
       );
     }
 
     (async () => {
-      const profile = await requireAuth(['parent', 'admin']);
+      ctx = await requireAuth(['parent', 'admin']);
       const form = document.getElementById('add-form') as HTMLFormElement;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const { error } = await supabase.from('athletes').insert({
-          parent_id: profile.id,
+        const { data: created, error } = await supabase.from('athletes').insert({
+          parent_id: ctx.profile.id,
           name: (document.getElementById('name') as HTMLInputElement).value,
           dob: (document.getElementById('dob') as HTMLInputElement).value,
           notes: (document.getElementById('notes') as HTMLTextAreaElement).value || null,
           medical_notes: (document.getElementById('medical') as HTMLTextAreaElement).value || null,
           media_consent: (document.getElementById('consent') as HTMLInputElement).checked,
-        });
+        }).select('id').single();
         if (error) return toast(errMsg(error), 'err');
-        toast('Athlete added!');
+        const { error: e2 } = await supabase.rpc('enrol_athlete', { p_athlete: created.id, p_club: ctx.club!.id });
+        if (e2) return toast(errMsg(e2), 'err');
+        toast('Athlete added & enrolled!');
         form.reset();
         render();
       });

@@ -1,3 +1,23 @@
+-- ============================================================
+-- LIVE RESET TO MULTI-CLUB v4 — run this WHOLE file ONCE in the
+-- Supabase SQL editor. It wipes the old app schema (auth logins
+-- survive), installs the multi-club schema, and re-seeds demo data.
+-- ============================================================
+do $$ begin
+  perform cron.unschedule('ignyte-register-reminders');
+exception when others then null; end $$;
+do $$ begin
+  perform cron.unschedule('ignyte-rebook-nudges');
+exception when others then null; end $$;
+
+drop schema public cascade;
+create schema public;
+grant usage on schema public to postgres, anon, authenticated, service_role;
+grant all on schema public to postgres, service_role;
+alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role;
+
 -- ============================================================================
 -- IGNYTE CLUB MANAGER — Supabase schema v4 (MULTI-CLUB)
 -- ----------------------------------------------------------------------------
@@ -1848,3 +1868,133 @@ insert into public.skills (club_id, discipline, category, name, level, sort) val
   (null, 'dance', 'Flexibility', 'Scorpion', 3, 34),
   (null, 'dance', 'Flexibility', 'Needle', 4, 35),
   (null, 'dance', 'Flexibility', 'Bow and arrow', 3, 36);
+
+-- ============================================================
+-- SEED — rebuild profiles for existing logins, create clubs
+-- ============================================================
+-- Profiles for every existing auth user (passwords survive).
+insert into public.profiles (id, full_name, email, phone, role)
+select u.id,
+  coalesce(nullif(u.raw_user_meta_data ->> 'full_name', ''), split_part(u.email, '@', 1)),
+  u.email, nullif(u.raw_user_meta_data ->> 'phone', ''), 'parent'
+from auth.users u
+on conflict (id) do nothing;
+
+update public.profiles set role = 'owner' where email = 'smithy.ns83@gmail.com';
+
+do $seed$
+declare
+  v_ignyte uuid;
+  v_storm uuid;
+  v_owner uuid := (select id from profiles where email = 'smithy.ns83@gmail.com');
+  v_nathan uuid := (select id from profiles where email = 'nathansmith00@hotmail.co.uk');
+  v_sarah uuid := (select id from profiles where email = 'sarah.parent@test.ignyte');
+  v_emma uuid := (select id from profiles where email = 'emma.parent@test.ignyte');
+  v_chloe uuid := (select id from profiles where email = 'chloe.athlete@test.ignyte');
+  v_jake uuid := (select id from profiles where email = 'jake.coach@test.ignyte');
+  v_lily uuid; v_max uuid; v_ava uuid;
+  v_main uuid; v_studio uuid; v_unit5 uuid;
+  v_next_sat date := current_date + (((6 - extract(dow from current_date))::int + 7) % 7);
+  v_t time; v_sid uuid; v_slot uuid; w int;
+begin
+  if v_next_sat <= current_date then v_next_sat := v_next_sat + 7; end if;
+
+  -- ---- Ignyte Cheer & Dance (your club, paid plan) ----
+  insert into clubs (name, slug, status, plan, blurb, contact_name, contact_email)
+  values ('Ignyte Cheer & Dance', 'ignyte', 'active', 'club',
+          'Cheer tumble & all-star dance privates in Bristol.', 'Nathan Smith', 'smithy.ns83@gmail.com')
+  returning id into v_ignyte;
+  insert into club_settings (club_id) values (v_ignyte);
+  insert into skills (club_id, discipline, category, name, level, sort)
+    select v_ignyte, discipline, category, name, level, sort from skills where club_id is null;
+  insert into locations (club_id, name) values (v_ignyte, 'Main Gym') returning id into v_main;
+  insert into locations (club_id, name) values (v_ignyte, 'Dance Studio') returning id into v_studio;
+
+  -- memberships (owner runs it as admin too so the club has a human admin)
+  insert into club_members (club_id, profile_id, role) values
+    (v_ignyte, v_owner, 'admin'),
+    (v_ignyte, v_nathan, 'coach');
+  if v_sarah is not null then insert into club_members (club_id, profile_id, role) values (v_ignyte, v_sarah, 'parent'); end if;
+  if v_emma is not null then insert into club_members (club_id, profile_id, role) values (v_ignyte, v_emma, 'parent'); end if;
+  if v_jake is not null then insert into club_members (club_id, profile_id, role) values (v_ignyte, v_jake, 'coach'); end if;
+  if v_chloe is not null then insert into club_members (club_id, profile_id, role) values (v_ignyte, v_chloe, 'athlete'); end if;
+
+  update coach_profiles set disciplines = array['tumble'], levels = 'Tumble L1-6', rate_per_lesson = 22
+    where club_id = v_ignyte and coach_id = v_nathan;
+  if v_jake is not null then
+    update coach_profiles set disciplines = array['tumble','dance'], levels = 'Tumble L1-4 · Dance', rate_per_lesson = 20
+      where club_id = v_ignyte and coach_id = v_jake;
+  end if;
+
+  -- athletes (shared records) + enrolments at Ignyte
+  if v_sarah is not null then
+    insert into athletes (parent_id, name, dob, notes) values (v_sarah, 'Lily Johnson', '2017-06-20', 'Working towards back handspring') returning id into v_lily;
+    insert into athletes (parent_id, name, dob) values (v_sarah, 'Max Johnson', '2014-02-11') returning id into v_max;
+    insert into athlete_enrolments (athlete_id, club_id) values (v_lily, v_ignyte), (v_max, v_ignyte);
+  end if;
+  if v_emma is not null then
+    insert into athletes (parent_id, name, dob, notes) values (v_emma, 'Ava Williams', '2012-09-03', 'All-star dance focus') returning id into v_ava;
+    insert into athlete_enrolments (athlete_id, club_id) values (v_ava, v_ignyte);
+  end if;
+  if v_chloe is not null then
+    insert into athlete_enrolments (athlete_id, club_id)
+      select a.id, v_ignyte from athletes a where a.profile_id = v_chloe;
+  end if;
+
+  -- Saturday slots at Main Gym, 09:00-11:00 x30min, cap 2, 4 weeks
+  v_t := '09:00';
+  while v_t < '11:00'::time loop
+    v_sid := gen_random_uuid();
+    for w in 0..3 loop
+      insert into slots (club_id, slot_date, start_time, end_time, capacity, series_id, location_id)
+      values (v_ignyte, v_next_sat + w * 7, v_t, v_t + interval '30 minutes', 2, v_sid, v_main)
+      returning id into v_slot;
+      insert into slot_coaches (slot_id, coach_id)
+        select v_slot, cid from unnest(array[v_nathan, v_jake]) as cid where cid is not null;
+    end loop;
+    v_t := v_t + interval '30 minutes';
+  end loop;
+
+  -- Lily's progression at Ignyte
+  if v_lily is not null and v_jake is not null then
+    insert into athlete_skills (athlete_id, skill_id, status, updated_by)
+      select v_lily, id, 'mastered', v_jake from skills where club_id = v_ignyte and name in ('Forward roll','Backward roll','Cartwheel');
+    insert into athlete_skills (athlete_id, skill_id, status, updated_by)
+      select v_lily, id, 'achieved', v_jake from skills where club_id = v_ignyte and name in ('Round off','Handstand','Bridge');
+    insert into progress_notes (club_id, athlete_id, coach_id, note)
+      values (v_ignyte, v_lily, v_jake, 'Cartwheels solid both sides — started back handspring drills on the barrel.');
+  end if;
+
+  -- ---- Storm Allstars (demo second club, free plan) ----
+  insert into clubs (name, slug, status, plan, blurb)
+  values ('Storm Allstars', 'storm', 'active', 'free', 'Demo club — proves the walls between clubs hold.')
+  returning id into v_storm;
+  insert into club_settings (club_id) values (v_storm);
+  insert into skills (club_id, discipline, category, name, level, sort)
+    select v_storm, discipline, category, name, level, sort from skills where club_id is null;
+  insert into locations (club_id, name) values (v_storm, 'Unit 5') returning id into v_unit5;
+  if v_jake is not null then
+    insert into club_members (club_id, profile_id, role) values (v_storm, v_jake, 'coach');
+    update coach_profiles set disciplines = array['dance'], rate_per_lesson = 25 where club_id = v_storm and coach_id = v_jake;
+  end if;
+  if v_emma is not null then
+    insert into club_members (club_id, profile_id, role) values (v_storm, v_emma, 'parent');
+    if v_ava is not null then insert into athlete_enrolments (athlete_id, club_id) values (v_ava, v_storm); end if;
+  end if;
+  -- Wednesday slots at Storm
+  v_sid := gen_random_uuid();
+  for w in 0..3 loop
+    insert into slots (club_id, slot_date, start_time, end_time, capacity, series_id, location_id)
+    values (v_storm, current_date + (((3 - extract(dow from current_date))::int + 7) % 7) + 7 * w + case when (((3 - extract(dow from current_date))::int + 7) % 7) = 0 then 7 else 0 end,
+            '17:00', '18:00', 1, v_sid, v_unit5)
+    returning id into v_slot;
+    if v_jake is not null then insert into slot_coaches (slot_id, coach_id) values (v_slot, v_jake); end if;
+  end loop;
+
+  raise notice 'Seed complete: Ignyte=% Storm=%', v_ignyte, v_storm;
+end;
+$seed$;
+
+select c.name, c.slug, c.join_code, c.plan, c.status,
+  (select count(*) from public.club_members m where m.club_id = c.id) as members
+from public.clubs c;

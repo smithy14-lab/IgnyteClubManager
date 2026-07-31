@@ -6,22 +6,22 @@ import IgnyteMark from '../components/IgnyteMark.astro';
 <AppLayout title="Create account" chrome={false}>
   <section class="min-h-[85dvh] flex items-center justify-center py-8">
     <div class="w-full max-w-sm surface-card p-7 animate-rise">
-      <div class="flex items-center gap-2.5 mb-6">
+      <div class="flex items-center gap-2.5 mb-2">
         <IgnyteMark size={30} />
         <h1 class="text-xl">Create account</h1>
       </div>
+      <p id="joining-note" class="hidden text-xs text-ignite-400 mb-4"></p>
 
-      <form id="signup-form" class="flex flex-col gap-4">
+      <form id="signup-form" class="flex flex-col gap-4 mt-4">
         <div>
           <label class="form-label">I am a…</label>
-          <div class="grid grid-cols-3 gap-2" id="role-picker">
-            <button type="button" data-role="parent" class="role-btn is-active">Parent</button>
+          <div class="grid grid-cols-2 gap-2" id="role-picker">
+            <button type="button" data-role="parent" class="role-btn is-active">Parent / guardian</button>
             <button type="button" data-role="athlete" class="role-btn">Athlete 18+</button>
-            <button type="button" data-role="coach" class="role-btn">Coach</button>
           </div>
           <p id="role-hint" class="mt-1.5 text-xs text-mist-500">
-            Parents book for their athletes. Athletes under 18 are added to a parent account and
-            don't get their own login.
+            Parents book for their athletes. Under-18s are added to a parent account — they don't get logins.
+            Coaches join by club invitation.
           </p>
         </div>
         <div>
@@ -31,7 +31,6 @@ import IgnyteMark from '../components/IgnyteMark.astro';
         <div id="dob-wrap" class="hidden">
           <label class="form-label" for="dob">Date of birth</label>
           <input class="field" id="dob" name="dob" type="date" />
-          <p class="mt-1 text-xs text-mist-500">You must be 18 or over for your own account.</p>
         </div>
         <div>
           <label class="form-label" for="email">Email</label>
@@ -43,15 +42,12 @@ import IgnyteMark from '../components/IgnyteMark.astro';
         </div>
         <div>
           <label class="form-label" for="password">Password</label>
-          <input
-            class="field"
-            id="password"
-            name="password"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            required
-          />
+          <input class="field" id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+        </div>
+        <div id="code-wrap">
+          <label class="form-label" for="join_code">Club code (optional)</label>
+          <input class="field uppercase" id="join_code" maxlength="6" placeholder="e.g. 7F2KQ9" />
+          <p class="mt-1 text-xs text-mist-500">With a code you join the club instantly; without one you can request to join after signing up.</p>
         </div>
         <button type="submit" class="btn btn-primary mt-1">Create account</button>
       </form>
@@ -70,7 +66,6 @@ import IgnyteMark from '../components/IgnyteMark.astro';
       font-weight: 600;
       color: var(--color-mist-300);
       cursor: pointer;
-      transition: all 0.15s ease;
     }
     .role-btn.is-active {
       border-color: var(--color-ignite-500);
@@ -84,22 +79,29 @@ import IgnyteMark from '../components/IgnyteMark.astro';
     import { toast, errMsg } from '../lib/app';
 
     let role = 'parent';
-    const hints: Record<string, string> = {
-      parent:
-        "Parents book for their athletes. Athletes under 18 are added to a parent account and don't get their own login.",
-      athlete: 'Athletes aged 18 or over manage their own bookings and progression.',
-      coach: 'Coaches join lesson slots, take the register and update athlete progression.',
-    };
+    const params = new URLSearchParams(location.search);
+    const clubSlug = params.get('club');
+    const presetCode = params.get('code');
+    const next = params.get('next');
+
+    if (presetCode) (document.getElementById('join_code') as HTMLInputElement).value = presetCode;
+    if (clubSlug) {
+      supabase.rpc('get_club_public', { p_slug: clubSlug }).then(({ data }) => {
+        const note = document.getElementById('joining-note')!;
+        if (data) {
+          note.textContent = `You're joining ${(data as { name: string }).name}`;
+          note.classList.remove('hidden');
+        }
+      });
+    }
+
     document.querySelectorAll<HTMLButtonElement>('.role-btn').forEach((btn) =>
       btn.addEventListener('click', () => {
         role = btn.dataset.role ?? 'parent';
         document.querySelectorAll('.role-btn').forEach((b) => b.classList.remove('is-active'));
         btn.classList.add('is-active');
         document.getElementById('dob-wrap')?.classList.toggle('hidden', role !== 'athlete');
-        const dob = document.getElementById('dob') as HTMLInputElement;
-        dob.required = role === 'athlete';
-        const hint = document.getElementById('role-hint');
-        if (hint) hint.textContent = hints[role];
+        (document.getElementById('dob') as HTMLInputElement).required = role === 'athlete';
       })
     );
 
@@ -107,19 +109,15 @@ import IgnyteMark from '../components/IgnyteMark.astro';
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-
       if (role === 'athlete') {
         const dob = new Date(String(fd.get('dob')) + 'T00:00:00');
         const cutoff = new Date();
         cutoff.setFullYear(cutoff.getFullYear() - 18);
         if (dob > cutoff) {
-          return toast(
-            'Under-18 athletes are added by a parent — please register a parent account instead.',
-            'err'
-          );
+          return toast('Under-18 athletes are added by a parent — register a parent account instead.', 'err');
         }
       }
-
+      const code = (document.getElementById('join_code') as HTMLInputElement).value.trim();
       const { error, data } = await supabase.auth.signUp({
         email: String(fd.get('email')),
         password: String(fd.get('password')),
@@ -129,17 +127,17 @@ import IgnyteMark from '../components/IgnyteMark.astro';
             phone: String(fd.get('phone') ?? ''),
             role,
             dob: role === 'athlete' ? String(fd.get('dob')) : null,
+            join_code: code || null,
+            join_slug: !code && clubSlug ? clubSlug : null,
           },
         },
       });
       if (error) return toast(errMsg(error), 'err');
-
-      // With email confirmation on, there's no session yet.
       if (!data.session) {
         toast('Account created — check your email to confirm, then sign in.');
-        setTimeout(() => (location.href = '/login'), 2500);
+        setTimeout(() => (location.href = '/login' + (next ? `?next=${encodeURIComponent(next)}` : '')), 2500);
       } else {
-        location.href = '/dashboard';
+        location.href = next && next.startsWith('/') ? next : '/dashboard';
       }
     });
   </script>

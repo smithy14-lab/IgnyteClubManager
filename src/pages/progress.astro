@@ -45,7 +45,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, esc, toast, errMsg, fmtDateTime } from '../lib/app';
+    import { requireAuth, myAthletes, esc, toast, errMsg, fmtDateTime, type ActiveClub } from '../lib/app';
 
     const content = document.getElementById('content')!;
     const picker = document.getElementById('athlete-picker') as HTMLSelectElement;
@@ -54,6 +54,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     type Disc = 'all' | 'tumble' | 'dance';
     let disc: Disc = 'all';
     let currentAthlete = '';
+    let club: ActiveClub | null = null;
 
     const statusMeta: Record<string, { emoji: string; label: string; pill: string }> = {
       not_started: { emoji: '⚪', label: 'Not started', pill: 'pill' },
@@ -105,17 +106,19 @@ import AppLayout from '../layouts/AppLayout.astro';
     async function render(athleteId: string) {
       currentAthlete = athleteId;
       const [{ data: skills }, { data: statuses }, { data: notes }, { data: media }] = await Promise.all([
-        supabase.from('skills').select('*').order('sort'),
+        supabase.from('skills').select('*').eq('club_id', club!.id).order('sort'),
         supabase.from('athlete_skills').select('*').eq('athlete_id', athleteId),
         supabase
           .from('progress_notes')
           .select('*, profiles!progress_notes_coach_id_fkey(full_name)')
+          .eq('club_id', club!.id)
           .eq('athlete_id', athleteId)
           .order('created_at', { ascending: false })
           .limit(30),
         supabase
           .from('skill_media')
           .select('*, skills(name)')
+          .eq('club_id', club!.id)
           .eq('athlete_id', athleteId)
           .order('created_at', { ascending: false })
           .limit(12),
@@ -240,6 +243,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       const { data } = await supabase
         .from('bookings')
         .select('discipline_focus')
+        .eq('club_id', club!.id)
         .eq('athlete_id', athleteId)
         .eq('status', 'booked');
       const set = new Set<string>();
@@ -261,8 +265,9 @@ import AppLayout from '../layouts/AppLayout.astro';
     }
 
     (async () => {
-      await requireAuth();
-      const athletes = await myAthletes();
+      const ctx = await requireAuth('any');
+      club = ctx.club!;
+      const athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
       if (!athletes.length) {
         content.innerHTML =
           '<div class="surface-card p-8 text-center text-sm text-mist-500">No athletes on your account yet.</div>';

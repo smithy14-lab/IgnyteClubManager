@@ -9,30 +9,36 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../../lib/supabase';
-    import { requireAuth, esc, toast, errMsg } from '../../lib/app';
+    import { requireOwner, esc, toast, errMsg } from '../../lib/app';
 
     const content = document.getElementById('content')!;
     const statusPill: Record<string, string> = {
-      lead: 'pill', trial: 'pill pill-warn', active: 'pill pill-success', churned: 'pill pill-danger',
+      active: 'pill pill-success', suspended: 'pill pill-warn', churned: 'pill pill-danger',
       new: 'pill pill-accent', contacted: 'pill pill-warn', converted: 'pill pill-success', closed: 'pill',
     };
 
+    type Club = {
+      id: string; name: string; slug: string; status: string; plan: string; join_code: string;
+      contact_email: string | null; created_at: string; families: number; coaches: number;
+      pending: number; bookings_per_week: number; last_booking_at: string | null;
+    };
+
     async function render() {
-      const [{ data: clubs }, { data: leads }, { count: users }, { count: bookings }] =
-        await Promise.all([
-          supabase.from('clubs').select('*').order('created_at', { ascending: false }),
-          supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(50),
-          supabase.from('profiles').select('*', { count: 'exact', head: true }),
-          supabase.from('bookings').select('*', { count: 'exact', head: true }),
-        ]);
+      const [{ data: health }, { data: leads }, { data: audit }] = await Promise.all([
+        supabase.rpc('owner_club_health'),
+        supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(30),
+        supabase.from('owner_audit').select('*').order('created_at', { ascending: false }).limit(15),
+      ]);
+      const clubs = (health ?? []) as Club[];
+      const liveClubs = clubs.filter((c) => c.status === 'active');
 
       content.innerHTML = `
         <div class="grid gap-4 grid-cols-2 sm:grid-cols-4 mb-6">
           ${[
-            ['Clubs', (clubs ?? []).filter((c) => c.status !== 'lead').length],
+            ['Active clubs', liveClubs.length],
+            ['Families', liveClubs.reduce((s, c) => s + Number(c.families), 0)],
+            ['Lessons/week', liveClubs.reduce((s, c) => s + Number(c.bookings_per_week), 0).toFixed(0)],
             ['Open leads', (leads ?? []).filter((l) => ['new', 'contacted'].includes(l.status)).length],
-            ['Accounts', users ?? 0],
-            ['Total bookings', bookings ?? 0],
           ]
             .map(
               ([label, n]) => `
@@ -44,9 +50,44 @@ import AppLayout from '../../layouts/AppLayout.astro';
             .join('')}
         </div>
 
+        <div class="surface-card p-5 mb-5">
+          <h2 class="text-base font-semibold mb-3">🏟️ Clubs</h2>
+          <div style="overflow-x:auto">
+          ${clubs
+            .map((c) => {
+              const quiet = c.last_booking_at && Date.now() - new Date(c.last_booking_at).getTime() > 21 * 864e5;
+              return `
+            <div class="py-3 border-t border-ink-700 first:border-0">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p class="text-sm font-semibold">${esc(c.name)} <span class="text-xs text-mist-500">/c/${esc(c.slug)}</span></p>
+                  <p class="text-xs text-mist-400 mt-0.5">
+                    ${c.families} families · ${c.coaches} coaches · ${c.bookings_per_week}/wk
+                    ${c.pending ? ` · <span class="text-charge-400">${c.pending} pending</span>` : ''}
+                    ${quiet ? ' · <span class="text-charge-400">quiet 3+ weeks</span>' : ''}
+                  </p>
+                </div>
+                <div class="flex gap-1.5 items-center flex-wrap">
+                  <span class="${statusPill[c.status] ?? 'pill'}">${c.status}</span>
+                  <select class="field !w-auto !py-1 !text-xs" data-plan="${c.id}">
+                    ${['free', 'club', 'comped'].map((pl) => `<option value="${pl}" ${pl === c.plan ? 'selected' : ''}>${pl}</option>`).join('')}
+                  </select>
+                  <select class="field !w-auto !py-1 !text-xs" data-status="${c.id}">
+                    ${['active', 'suspended', 'churned'].map((st) => `<option value="${st}" ${st === c.status ? 'selected' : ''}>${st}</option>`).join('')}
+                  </select>
+                  <button class="btn btn-ghost btn-sm" data-viewas="${c.id}" data-name="${esc(c.name)}">View as admin</button>
+                </div>
+              </div>
+            </div>`;
+            })
+            .join('')}
+          </div>
+          <p class="text-xs text-mist-500 mt-3">"View as admin" is read-only until you grant yourself a 60-minute support window (logged in the audit trail). New clubs self-serve at /start.</p>
+        </div>
+
         <div class="grid gap-5 lg:grid-cols-2">
           <div class="surface-card p-5">
-            <h2 class="text-base font-semibold mb-3">📥 Leads (from the website)</h2>
+            <h2 class="text-base font-semibold mb-3">📥 Leads</h2>
             ${
               (leads ?? []).length
                 ? (leads ?? [])
@@ -62,120 +103,87 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   ${
                     ['new', 'contacted'].includes(l.status)
                       ? `<div class="mt-2 flex gap-1.5 flex-wrap">
-                          <button class="btn btn-ghost btn-sm" data-lead-status="contacted" data-lead="${l.id}">Mark contacted</button>
-                          <button class="btn btn-primary btn-sm" data-lead-convert="${l.id}">Convert to club</button>
-                          <button class="btn btn-danger btn-sm" data-lead-status="closed" data-lead="${l.id}">Close</button>
+                          <button class="btn btn-ghost btn-sm" data-lead="contacted" data-id="${l.id}">Contacted</button>
+                          <button class="btn btn-ghost btn-sm" data-lead="converted" data-id="${l.id}">Converted</button>
+                          <button class="btn btn-danger btn-sm" data-lead="closed" data-id="${l.id}">Close</button>
                         </div>`
                       : ''
                   }
                 </div>`
                     )
                     .join('')
-                : '<p class="text-sm text-mist-500">No leads yet — they arrive from the Contact page.</p>'
+                : '<p class="text-sm text-mist-500">No leads yet — they arrive from the Contact page. Clubs can also self-serve at /start.</p>'
             }
           </div>
 
           <div>
             <div class="surface-card p-5 mb-5">
-              <h2 class="text-base font-semibold mb-3">🏟️ Clubs</h2>
-              ${(clubs ?? [])
-                .map(
-                  (c) => `
-                <div class="py-3 border-t border-ink-700 first:border-0">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <p class="text-sm font-semibold">${esc(c.name)}</p>
-                    <select class="field !w-auto !py-1 !text-xs" data-club-status="${c.id}">
-                      ${['lead', 'trial', 'active', 'churned'].map((s) => `<option value="${s}" ${s === c.status ? 'selected' : ''}>${s}</option>`).join('')}
-                    </select>
-                  </div>
-                  <p class="text-xs text-mist-400 mt-0.5">${esc(c.contact_name ?? '')}${c.contact_email ? ' · ' + esc(c.contact_email) : ''}</p>
-                  ${c.notes ? `<p class="text-xs text-mist-500 mt-0.5">${esc(c.notes)}</p>` : ''}
-                </div>`
-                )
-                .join('')}
-              <div class="mt-4 pt-3 border-t border-ink-700 flex gap-2">
-                <input class="field flex-1" id="club-new" placeholder="Add a club manually…" />
-                <button class="btn btn-primary btn-sm" id="club-add">Add</button>
-              </div>
-              <p class="text-xs text-mist-500 mt-2">Per-club data isolation is the next milestone — new clubs currently share this instance.</p>
+              <h2 class="text-base font-semibold mb-2">📣 Announce to all club admins</h2>
+              <input class="field mb-2" id="an-title" placeholder="Title" />
+              <textarea class="field mb-2" id="an-body" rows="2" placeholder="Message to every club's admins…"></textarea>
+              <button class="btn btn-primary btn-sm" id="an-send">Send announcement</button>
             </div>
-
             <div class="surface-card p-5">
-              <h2 class="text-base font-semibold mb-1">➕ Create an account</h2>
-              <p class="text-xs text-mist-500 mb-3">Any role, instantly confirmed. They set their password with "Forgotten password" on first sign-in.</p>
-              <div class="flex flex-col gap-2.5">
-                <input class="field" id="acc-name" placeholder="Full name" />
-                <input class="field" id="acc-email" type="email" placeholder="Email" />
-                <select class="field" id="acc-role">
-                  <option value="parent">Parent</option>
-                  <option value="coach">Coach</option>
-                  <option value="admin">Club admin</option>
-                  <option value="athlete">Adult athlete</option>
-                </select>
-                <button class="btn btn-primary btn-sm" id="acc-create">Create account</button>
-              </div>
+              <h2 class="text-base font-semibold mb-2">🧾 Audit trail</h2>
+              ${(audit ?? [])
+                .map(
+                  (a) => `<p class="text-xs text-mist-400 py-1 border-t border-ink-700 first:border-0">
+                    ${new Date(a.created_at).toLocaleString()} · <b>${esc(a.action)}</b>${a.detail ? ' · ' + esc(a.detail) : ''}</p>`
+                )
+                .join('') || '<p class="text-sm text-mist-500">Nothing yet.</p>'}
             </div>
           </div>
         </div>`;
 
-      content.querySelectorAll<HTMLButtonElement>('[data-lead-status]').forEach((b) =>
-        b.addEventListener('click', async () => {
-          const { error } = await supabase
-            .from('club_leads')
-            .update({ status: b.dataset.leadStatus })
-            .eq('id', b.dataset.lead);
-          if (error) return toast(errMsg(error), 'err');
-          render();
-        })
-      );
-      content.querySelectorAll<HTMLButtonElement>('[data-lead-convert]').forEach((b) =>
-        b.addEventListener('click', async () => {
-          const { data: lead } = await supabase.from('club_leads').select('*').eq('id', b.dataset.leadConvert).single();
-          if (!lead) return;
-          const { error } = await supabase.from('clubs').insert({
-            name: lead.club_name,
-            status: 'trial',
-            contact_name: lead.contact_name,
-            contact_email: lead.email,
-            notes: lead.message,
-          });
-          if (error) return toast(errMsg(error), 'err');
-          await supabase.from('club_leads').update({ status: 'converted' }).eq('id', lead.id);
-          toast(`${lead.club_name} converted to a trial club! 🎉`);
-          render();
-        })
-      );
-      content.querySelectorAll<HTMLSelectElement>('[data-club-status]').forEach((sel) =>
+      content.querySelectorAll<HTMLSelectElement>('[data-plan]').forEach((sel) =>
         sel.addEventListener('change', async () => {
-          const { error } = await supabase.from('clubs').update({ status: sel.value }).eq('id', sel.dataset.clubStatus);
+          const { error } = await supabase.rpc('owner_set_plan', { p_club: sel.dataset.plan, p_plan: sel.value });
           if (error) return toast(errMsg(error), 'err');
-          toast('Club updated.');
+          toast('Plan updated.');
         })
       );
-      document.getElementById('club-add')?.addEventListener('click', async () => {
-        const name = (document.getElementById('club-new') as HTMLInputElement).value.trim();
-        if (!name) return;
-        const { error } = await supabase.from('clubs').insert({ name, status: 'trial' });
+      content.querySelectorAll<HTMLSelectElement>('[data-status]').forEach((sel) =>
+        sel.addEventListener('change', async () => {
+          if (sel.value !== 'active' && !confirm(`Set this club to ${sel.value}? Members will be locked out until it's active again.`)) {
+            render();
+            return;
+          }
+          const { error } = await supabase.rpc('owner_set_club_status', { p_club: sel.dataset.status, p_status: sel.value });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Status updated.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-viewas]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (confirm(`Open ${b.dataset.name} as admin?\n\nOK = grant yourself a 60-minute SUPPORT window (you can make changes; everything is logged).\nCancel = read-only view.`)) {
+            const { error } = await supabase.rpc('owner_grant_support', { p_club: b.dataset.viewas, p_minutes: 60 });
+            if (error) return toast(errMsg(error), 'err');
+          }
+          localStorage.setItem('icm-active-club', b.dataset.viewas!);
+          location.href = `/admin?club=${b.dataset.viewas}`;
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-lead]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { error } = await supabase.from('club_leads').update({ status: b.dataset.lead }).eq('id', b.dataset.id);
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+      document.getElementById('an-send')?.addEventListener('click', async () => {
+        const title = (document.getElementById('an-title') as HTMLInputElement).value.trim();
+        const body = (document.getElementById('an-body') as HTMLTextAreaElement).value.trim();
+        if (!title || !body) return toast('Title and message required.', 'err');
+        const { data, error } = await supabase.rpc('owner_announce', { p_title: title, p_body: body });
         if (error) return toast(errMsg(error), 'err');
-        render();
-      });
-      document.getElementById('acc-create')?.addEventListener('click', async () => {
-        const name = (document.getElementById('acc-name') as HTMLInputElement).value.trim();
-        const email = (document.getElementById('acc-email') as HTMLInputElement).value.trim();
-        if (!name || !email) return toast('Name and email required.', 'err');
-        const { error } = await supabase.rpc('owner_create_account', {
-          p_email: email,
-          p_full_name: name,
-          p_role: (document.getElementById('acc-role') as HTMLSelectElement).value,
-        });
-        if (error) return toast(errMsg(error), 'err');
-        toast(`Account created for ${name} — tell them to use "Forgotten password" to set theirs.`);
+        toast(`Sent to ${data} club admin(s).`);
         render();
       });
     }
 
     (async () => {
-      await requireAuth(['owner']);
+      await requireOwner();
       await render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');

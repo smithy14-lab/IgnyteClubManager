@@ -1,0 +1,105 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import IgnyteMark from '../components/IgnyteMark.astro';
+---
+
+<AppLayout title="Start your club">
+  <div class="max-w-md mx-auto">
+    <div class="text-center mb-6">
+      <IgnyteMark size={48} />
+      <h1 class="text-2xl mt-3">Start your club</h1>
+      <p class="text-sm text-mist-400 mt-1">Free to set up. You'll be taking bookings in minutes.</p>
+    </div>
+
+    <form id="wizard" class="surface-card p-6 flex flex-col gap-4">
+      <div>
+        <label class="form-label" for="w-name">Club name</label>
+        <input class="field" id="w-name" required maxlength="60" placeholder="e.g. Storm Allstars" />
+      </div>
+      <div>
+        <label class="form-label" for="w-slug">Your club link</label>
+        <div class="flex items-center gap-1 text-sm text-mist-500">
+          <span>/c/</span>
+          <input class="field flex-1" id="w-slug" required pattern="[a-z0-9][a-z0-9-]{1,28}[a-z0-9]" placeholder="storm-allstars" />
+        </div>
+        <p class="text-xs text-mist-500 mt-1">Lowercase letters, numbers and dashes. This is the link you'll share with parents.</p>
+      </div>
+      <div>
+        <label class="form-label">What do you coach?</label>
+        <label class="text-sm block"><input type="checkbox" id="w-tumble" checked /> Cheer tumble</label>
+        <label class="text-sm block"><input type="checkbox" id="w-dance" checked /> All-star dance</label>
+      </div>
+      <div>
+        <label class="form-label" for="w-loc">Your first venue</label>
+        <input class="field" id="w-loc" placeholder="Main Gym" />
+      </div>
+      <div>
+        <label class="form-label" for="w-tz">Timezone</label>
+        <select class="field" id="w-tz">
+          <option value="Europe/London" selected>UK (Europe/London)</option>
+          <option value="Europe/Dublin">Ireland</option>
+          <option value="America/New_York">US Eastern</option>
+          <option value="America/Chicago">US Central</option>
+          <option value="America/Los_Angeles">US Pacific</option>
+          <option value="Australia/Sydney">Australia (Sydney)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" type="submit">Create my club</button>
+    </form>
+
+    <div id="done" class="hidden surface-card p-6 text-center" style="box-shadow: var(--shadow-glow)">
+      <p class="text-3xl">🎉</p>
+      <h2 class="text-lg mt-2">Your club is live!</h2>
+      <div class="text-left mt-4 text-sm flex flex-col gap-2">
+        <p>📎 Share your portal link: <code id="d-link" class="text-ignite-400"></code></p>
+        <p>🔑 Instant-join code: <code id="d-code" class="text-ignite-400 text-lg"></code></p>
+        <p class="text-xs text-mist-500">Parents with the code join instantly; without it they request approval. Invite coaches from Admin → People.</p>
+      </div>
+      <a href="/admin" class="btn btn-primary mt-5">Open your admin</a>
+    </div>
+  </div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requireAuth, setActiveClub, toast, errMsg } from '../lib/app';
+
+    const nameEl = document.getElementById('w-name') as HTMLInputElement;
+    const slugEl = document.getElementById('w-slug') as HTMLInputElement;
+    nameEl.addEventListener('input', () => {
+      if (!slugEl.dataset.touched) {
+        slugEl.value = nameEl.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+      }
+    });
+    slugEl.addEventListener('input', () => (slugEl.dataset.touched = '1'));
+
+    (document.getElementById('wizard') as HTMLFormElement).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const disciplines = [
+        (document.getElementById('w-tumble') as HTMLInputElement).checked && 'tumble',
+        (document.getElementById('w-dance') as HTMLInputElement).checked && 'dance',
+      ].filter(Boolean);
+      if (!disciplines.length) return toast('Pick at least one discipline.', 'err');
+      const { data, error } = await supabase.rpc('provision_club', {
+        p_name: nameEl.value.trim(),
+        p_slug: slugEl.value.trim(),
+        p_timezone: (document.getElementById('w-tz') as HTMLSelectElement).value,
+        p_disciplines: disciplines,
+        p_location: (document.getElementById('w-loc') as HTMLInputElement).value.trim() || 'Main venue',
+      });
+      if (error) {
+        const msg = errMsg(error);
+        return toast(msg.includes('duplicate') || msg.includes('unique') ? 'That link is taken — try another.' : msg, 'err');
+      }
+      const res = data as { club_id: string; slug: string; join_code: string };
+      await setActiveClub(res.club_id);
+      document.getElementById('wizard')!.classList.add('hidden');
+      document.getElementById('d-link')!.textContent = `${location.origin}/c/${res.slug}`;
+      document.getElementById('d-code')!.textContent = res.join_code;
+      document.getElementById('done')!.classList.remove('hidden');
+    });
+
+    requireAuth().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>
