@@ -238,6 +238,67 @@
   .pill-warn { color: var(--color-charge-400); border-color: color-mix(in srgb, var(--color-charge-400) 40%, transparent); }
   .pill-danger { color: #ff8080; border-color: color-mix(in srgb, #ff4d4d 40%, transparent); }
 
+  /* Month calendar */
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 2px;
+  }
+  .cal-head div {
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-mist-500);
+    padding-bottom: 0.4rem;
+  }
+  .cal-cell {
+    min-height: 4.6rem;
+    background: var(--color-ink-900);
+    border-radius: 0.5rem;
+    padding: 0.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+  }
+  .cal-empty { background: transparent; }
+  .cal-today { outline: 1px solid var(--color-ignite-500); }
+  .cal-daynum {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--color-mist-400);
+    padding: 0.1rem 0.2rem;
+  }
+  .cal-today .cal-daynum { color: var(--color-ignite-400); }
+  .cal-chip {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-size: 0.62rem;
+    font-weight: 600;
+    line-height: 1.25;
+    padding: 0.15rem 0.3rem;
+    border-radius: 0.3rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .cal-ok { background: color-mix(in srgb, #2ecc71 16%, transparent); color: #7ee2a8; }
+  .cal-ok:hover { border-color: #2ecc71; }
+  .cal-danger { background: color-mix(in srgb, #ff4d4d 14%, transparent); color: #ff8080; }
+  .cal-danger:hover { border-color: #ff4d4d; }
+  .cal-accent { background: color-mix(in srgb, var(--color-ignite-500) 16%, transparent); color: var(--color-ignite-400); }
+  .cal-accent:hover { border-color: var(--color-ignite-500); }
+  .cal-warn { background: color-mix(in srgb, var(--color-charge-400) 14%, transparent); color: var(--color-charge-400); }
+  .cal-warn:hover { border-color: var(--color-charge-400); }
+  .cal-muted { background: var(--color-ink-800); color: var(--color-mist-500); }
+  .cal-more { font-size: 0.58rem; color: var(--color-mist-500); padding-left: 0.3rem; }
+
   /* Skill progress bar */
   .progress-track {
     height: 0.5rem;

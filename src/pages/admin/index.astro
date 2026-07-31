@@ -21,6 +21,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
   <script>
     import { supabase } from '../../lib/supabase';
     import { requireAuth, fmtDate, fmtTime, esc, toast, errMsg } from '../../lib/app';
+    import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../../lib/calendar';
 
     const content = document.getElementById('content')!;
     let tab = 'slots';
@@ -54,7 +55,70 @@ import AppLayout from '../../layouts/AppLayout.astro';
     }
 
     // ============================ SLOTS ============================
+    type Slot = {
+      id: string; slot_date: string; start_time: string; end_time: string;
+      capacity: number; series_id: string | null; booked: number; waiting: number;
+      location: string | null; location_id: string | null;
+      coaches: { id: string; name: string }[];
+    };
+    let slotView: 'tiles' | 'calendar' =
+      (localStorage.getItem('icm-admin-view') as 'tiles' | 'calendar') ?? 'tiles';
+    const calCursor = new Date();
+    let pendingManage: string | null = null;
+
+    function slotToggleHtml(): string {
+      return `<div class="flex justify-end mb-3" id="slot-toggle">${renderViewToggle(slotView)}</div>`;
+    }
+    function wireSlotToggle() {
+      document.querySelectorAll<HTMLButtonElement>('#slot-toggle [data-view]').forEach((b) =>
+        b.addEventListener('click', () => {
+          slotView = b.dataset.view as 'tiles' | 'calendar';
+          localStorage.setItem('icm-admin-view', slotView);
+          renderSlots();
+        })
+      );
+    }
+
+    async function renderSlotsCalendar() {
+      const y = calCursor.getFullYear();
+      const m = calCursor.getMonth();
+      const { data: board } = await supabase.rpc('get_slot_board', {
+        p_from: `${y}-${String(m + 1).padStart(2, '0')}-01`,
+        p_to: isoDate(new Date(y, m + 1, 0)),
+      });
+      const slots = (board ?? []) as Slot[];
+      const chips = new Map<string, CalChip[]>();
+      for (const s of slots) {
+        (chips.get(s.slot_date) ?? chips.set(s.slot_date, []).get(s.slot_date)!).push({
+          id: s.id,
+          label: `${fmtTime(s.start_time)} ${s.booked}/${s.capacity}`,
+          tone: s.booked >= s.capacity ? 'danger' : s.booked > 0 ? 'accent' : 'ok',
+          title: `${s.location ?? ''} — ${s.coaches.map((c) => c.name).join(', ') || 'no coaches'}${s.waiting ? ` · ${s.waiting} waiting` : ''}`,
+        });
+      }
+      content.innerHTML = slotToggleHtml() + renderMonthCalendar(y, m, chips);
+      wireSlotToggle();
+      content.querySelector('[data-cal-prev]')?.addEventListener('click', () => {
+        calCursor.setMonth(calCursor.getMonth() - 1);
+        renderSlotsCalendar();
+      });
+      content.querySelector('[data-cal-next]')?.addEventListener('click', () => {
+        calCursor.setMonth(calCursor.getMonth() + 1);
+        renderSlotsCalendar();
+      });
+      content.querySelectorAll<HTMLButtonElement>('[data-chip]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          // Jump to the tile and open its manage panel.
+          slotView = 'tiles';
+          localStorage.setItem('icm-admin-view', 'tiles');
+          pendingManage = b.dataset.chip!;
+          await renderSlots();
+        })
+      );
+    }
+
     async function renderSlots() {
+      if (slotView === 'calendar') return renderSlotsCalendar();
       const from = new Date().toISOString().slice(0, 10);
       const toD = new Date();
       toD.setDate(toD.getDate() + 56);
@@ -62,15 +126,9 @@ import AppLayout from '../../layouts/AppLayout.astro';
         p_from: from,
         p_to: toD.toISOString().slice(0, 10),
       });
-      type Slot = {
-        id: string; slot_date: string; start_time: string; end_time: string;
-        capacity: number; series_id: string | null; booked: number; waiting: number;
-        location: string | null; location_id: string | null;
-        coaches: { id: string; name: string }[];
-      };
       const slots = (board ?? []) as Slot[];
 
-      content.innerHTML = `
+      content.innerHTML = slotToggleHtml() + `
         <div class="surface-card p-5 mb-6 max-w-2xl">
           <h2 class="text-base font-semibold mb-4">Add slots</h2>
           <form id="slot-form" class="grid gap-3 sm:grid-cols-3">
@@ -149,6 +207,16 @@ import AppLayout from '../../layouts/AppLayout.astro';
               : '<p class="text-sm text-mist-500 sm:col-span-2">No upcoming slots.</p>'
           }
         </div>`;
+
+      wireSlotToggle();
+      if (pendingManage) {
+        const target = slots.find((s) => s.id === pendingManage);
+        if (target) {
+          openManage(pendingManage, target);
+          content.querySelector(`[data-slot-card="${pendingManage}"]`)?.scrollIntoView({ block: 'center' });
+        }
+        pendingManage = null;
+      }
 
       const endInput = document.getElementById('s-end') as HTMLInputElement;
       endInput.addEventListener('input', () =>

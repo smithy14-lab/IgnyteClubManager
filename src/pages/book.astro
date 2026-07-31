@@ -4,7 +4,10 @@ import AppLayout from '../layouts/AppLayout.astro';
 
 <AppLayout title="Book a lesson">
   <p class="eyebrow">Booking</p>
-  <h1 class="text-2xl mt-1 mb-5">Find a lesson</h1>
+  <div class="flex flex-wrap items-center justify-between gap-3 mt-1 mb-5">
+    <h1 class="text-2xl">Find a lesson</h1>
+    <div id="view-toggle"></div>
+  </div>
 
   <div class="surface-card p-4 mb-6 grid gap-3 grid-cols-2 sm:grid-cols-5">
     <div>
@@ -34,6 +37,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     </div>
   </div>
 
+  <div id="cal-host" class="hidden"></div>
   <div id="board"><p class="text-mist-500 text-sm">Loading timetable…</p></div>
 
   <!-- booking / waitlist panel -->
@@ -48,6 +52,15 @@ import AppLayout from '../layouts/AppLayout.astro';
         <div>
           <label class="form-label" for="p-athlete">Athlete</label>
           <select class="field" id="p-athlete"></select>
+        </div>
+        <div id="p-disc-wrap">
+          <label class="form-label">What's this lesson for?</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" data-disc="tumble" class="disc-btn is-active">Tumble</button>
+            <button type="button" data-disc="dance" class="disc-btn">Dance</button>
+            <button type="button" data-disc="both" class="disc-btn">Both</button>
+          </div>
+          <p class="mt-1.5 text-xs text-mist-500">Coaches are filtered to those who cover it.</p>
         </div>
         <div>
           <label class="form-label" for="p-coach">Coach</label>
@@ -70,16 +83,26 @@ import AppLayout from '../layouts/AppLayout.astro';
   </div>
 
   <style>
-    #p-oneoff.is-active, #p-weekly.is-active {
-      border-color: var(--color-ignite-500);
+    #p-oneoff.is-active, #p-weekly.is-active, .disc-btn.is-active {
+      border-color: var(--color-ignite-500) !important;
       color: var(--color-ignite-400);
       background: color-mix(in srgb, var(--color-ignite-500) 10%, transparent);
+    }
+    .disc-btn {
+      border: 1px solid var(--color-ink-600);
+      border-radius: var(--radius-md);
+      padding: 0.45rem 0.25rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--color-mist-300);
+      cursor: pointer;
     }
   </style>
 
   <script>
     import { supabase } from '../lib/supabase';
     import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
+    import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../lib/calendar';
 
     type Coach = {
       id: string; name: string; busy: boolean;
@@ -114,6 +137,17 @@ import AppLayout from '../layouts/AppLayout.astro';
     let mode: 'book' | 'waitlist' = 'book';
     let activeSlot: Slot | null = null;
     let weekly = false;
+    let discipline: 'tumble' | 'dance' | 'both' = 'tumble';
+    let view: 'tiles' | 'calendar' =
+      (localStorage.getItem('icm-book-view') as 'tiles' | 'calendar') ?? 'tiles';
+    const calCursor = new Date();
+    let calSlots: Slot[] = [];
+
+    function coachCovers(c: Coach, d: string): boolean {
+      if (!c.disciplines || !c.disciplines.length) return true;
+      if (d === 'both') return c.disciplines.includes('tumble') && c.disciplines.includes('dance');
+      return c.disciplines.includes(d);
+    }
 
     const today = new Date();
     fFrom.value = today.toISOString().slice(0, 10);
@@ -164,15 +198,84 @@ import AppLayout from '../layouts/AppLayout.astro';
       return h >= 17;
     }
 
-    function render() {
-      const now = new Date();
-      const filtered = slots.filter((s) => {
-        if (!inTimeband(s.start_time)) return false;
-        if (fLoc.value && s.location_id !== fLoc.value) return false;
-        if (fCoach.value && !s.coaches.some((c) => c.id === fCoach.value)) return false;
-        if (new Date(s.slot_date + 'T' + s.end_time) < now) return false;
-        return true;
+    function passesFilters(s: Slot): boolean {
+      if (!inTimeband(s.start_time)) return false;
+      if (fLoc.value && s.location_id !== fLoc.value) return false;
+      if (fCoach.value && !s.coaches.some((c) => c.id === fCoach.value)) return false;
+      if (new Date(s.slot_date + 'T' + s.end_time) < new Date()) return false;
+      return true;
+    }
+
+    // ---------- calendar view ----------
+    function renderToggle() {
+      const host = document.getElementById('view-toggle')!;
+      host.innerHTML = renderViewToggle(view);
+      host.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) =>
+        b.addEventListener('click', () => {
+          view = b.dataset.view as 'tiles' | 'calendar';
+          localStorage.setItem('icm-book-view', view);
+          renderToggle();
+          syncView();
+        })
+      );
+    }
+
+    function syncView() {
+      document.getElementById('board')!.classList.toggle('hidden', view === 'calendar');
+      document.getElementById('cal-host')!.classList.toggle('hidden', view !== 'calendar');
+      if (view === 'calendar') renderCalendar();
+      else render();
+    }
+
+    async function renderCalendar() {
+      const host = document.getElementById('cal-host')!;
+      const y = calCursor.getFullYear();
+      const m = calCursor.getMonth();
+      const { data, error } = await supabase.rpc('get_slot_board', {
+        p_from: `${y}-${String(m + 1).padStart(2, '0')}-01`,
+        p_to: isoDate(new Date(y, m + 1, 0)),
       });
+      if (error) return toast(errMsg(error), 'err');
+      calSlots = (data ?? []) as Slot[];
+
+      const chips = new Map<string, CalChip[]>();
+      for (const s of calSlots) {
+        if (!passesFilters(s)) continue;
+        const free = s.capacity - s.booked;
+        const freeCoaches = s.coaches.filter((c) => !c.busy);
+        const bookable = free > 0 && freeCoaches.length > 0;
+        const spaces = Math.min(free, freeCoaches.length);
+        (chips.get(s.slot_date) ?? chips.set(s.slot_date, []).get(s.slot_date)!).push({
+          id: s.id,
+          label: `${fmtTime(s.start_time)}${bookable ? ` · ${spaces}` : ' full'}`,
+          tone: bookable ? 'ok' : 'danger',
+          title: `${s.location ?? ''} — ${s.coaches.map((c) => c.name).join(', ') || 'no coaches yet'}`,
+        });
+      }
+
+      host.innerHTML = renderMonthCalendar(y, m, chips);
+      host.querySelector('[data-cal-prev]')?.addEventListener('click', () => {
+        calCursor.setMonth(calCursor.getMonth() - 1);
+        renderCalendar();
+      });
+      host.querySelector('[data-cal-next]')?.addEventListener('click', () => {
+        calCursor.setMonth(calCursor.getMonth() + 1);
+        renderCalendar();
+      });
+      host.querySelectorAll<HTMLButtonElement>('[data-chip]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const slot = calSlots.find((s) => s.id === b.dataset.chip);
+          if (!slot) return;
+          slots = calSlots;
+          const free = slot.capacity - slot.booked;
+          const freeCoaches = slot.coaches.filter((c) => !c.busy);
+          openPanel(slot.id, free > 0 && freeCoaches.length > 0 ? 'book' : 'waitlist');
+        })
+      );
+    }
+
+    function render() {
+      const filtered = slots.filter(passesFilters);
 
       if (!filtered.length) {
         board.innerHTML =
@@ -266,13 +369,12 @@ import AppLayout from '../layouts/AppLayout.astro';
         .map((a) => `<option value="${a.id}">${esc(a.name)}</option>`)
         .join('');
 
-      const options =
-        m === 'book'
-          ? activeSlot.coaches.filter((c) => !c.busy)
-          : activeSlot.coaches;
-      pCoach.innerHTML =
-        (m === 'waitlist' ? '<option value="">Any coach</option>' : '') +
-        options.map((c) => `<option value="${c.id}">${esc(coachLabel(c))}</option>`).join('');
+      discipline = 'tumble';
+      document.querySelectorAll('.disc-btn').forEach((b) =>
+        b.classList.toggle('is-active', (b as HTMLElement).dataset.disc === discipline)
+      );
+      document.getElementById('p-disc-wrap')!.classList.toggle('hidden', m === 'waitlist');
+      updateCoachOptions();
 
       const freq = document.getElementById('p-freq-wrap')!;
       freq.classList.toggle('hidden', m === 'waitlist' || !activeSlot.series_id);
@@ -280,6 +382,30 @@ import AppLayout from '../layouts/AppLayout.astro';
       pConfirm.textContent = m === 'book' ? 'Confirm booking' : 'Join waiting list';
       backdrop.classList.remove('hidden');
     }
+
+    function updateCoachOptions() {
+      if (!activeSlot) return;
+      const options =
+        mode === 'book'
+          ? activeSlot.coaches.filter((c) => !c.busy && coachCovers(c, discipline))
+          : activeSlot.coaches;
+      pCoach.innerHTML =
+        (mode === 'waitlist' ? '<option value="">Any coach</option>' : '') +
+        options.map((c) => `<option value="${c.id}">${esc(coachLabel(c))}</option>`).join('');
+      if (mode === 'book' && !options.length) {
+        pCoach.innerHTML = '<option value="">No free coach covers this</option>';
+      }
+      pConfirm.disabled = mode === 'book' && !options.length;
+    }
+
+    document.querySelectorAll<HTMLButtonElement>('.disc-btn').forEach((b) =>
+      b.addEventListener('click', () => {
+        discipline = (b.dataset.disc as typeof discipline) ?? 'tumble';
+        document.querySelectorAll('.disc-btn').forEach((x) => x.classList.remove('is-active'));
+        b.classList.add('is-active');
+        updateCoachOptions();
+      })
+    );
 
     document.getElementById('panel-close')?.addEventListener('click', () => backdrop.classList.add('hidden'));
     backdrop.addEventListener('click', (e) => {
@@ -308,6 +434,7 @@ import AppLayout from '../layouts/AppLayout.astro';
             p_athlete_id: pAthlete.value,
             p_coach_id: pCoach.value,
             p_weekly: weekly,
+            p_discipline: discipline,
           });
           if (error) throw error;
           const skipped = (data as { skipped?: number })?.skipped ?? 0;
@@ -327,6 +454,7 @@ import AppLayout from '../layouts/AppLayout.astro';
         }
         backdrop.classList.add('hidden');
         await load();
+        if (view === 'calendar') await renderCalendar();
       } catch (e) {
         toast(errMsg(e), 'err');
       } finally {
@@ -335,14 +463,21 @@ import AppLayout from '../layouts/AppLayout.astro';
     });
 
     [fFrom, fTo].forEach((el) => el.addEventListener('change', load));
-    [fLoc, fCoach, fTime].forEach((el) => el.addEventListener('change', render));
+    [fLoc, fCoach, fTime].forEach((el) =>
+      el.addEventListener('change', () => {
+        render();
+        if (view === 'calendar') renderCalendar();
+      })
+    );
 
     (async () => {
       await requireAuth();
       athletes = await myAthletes();
       const { data: settings } = await supabase.from('club_settings').select('cancellation_policy').single();
       policyText = settings?.cancellation_policy ?? '';
+      renderToggle();
       await load();
+      syncView();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
     });

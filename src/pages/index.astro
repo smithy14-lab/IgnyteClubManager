@@ -1,25 +1,60 @@
 ---
 import AppLayout from '../layouts/AppLayout.astro';
 import IgnyteMark from '../components/IgnyteMark.astro';
+
+const features = [
+  {
+    emoji: '⚡',
+    title: 'Book in seconds',
+    body: 'Live calendar of 1-2-1 slots by coach, discipline, time and location — one-offs or weekly until cancelled.',
+  },
+  {
+    emoji: '📈',
+    title: 'Watch skills land',
+    body: 'Every lesson updates a real skill journey — levels, badges and coach notes your family can see grow.',
+  },
+  {
+    emoji: '🔁',
+    title: 'Waiting lists that work',
+    body: 'Cancelled spaces are offered to the next family automatically, with a fair claim window.',
+  },
+  {
+    emoji: '🧾',
+    title: 'Club admin, sorted',
+    body: 'Registers, coach pay export to Excel, locations, cancellation policies — all in one place.',
+  },
+];
 ---
 
 <AppLayout title="Welcome" chrome={false}>
-  <section class="min-h-[80dvh] flex flex-col items-center justify-center text-center animate-rise">
-    <IgnyteMark size={72} />
-    <h1 class="mt-6 text-headline">
-      Ignyte <span class="ignite-text">Club Manager</span>
+  <section class="min-h-[70dvh] flex flex-col items-center justify-center text-center pt-10 animate-rise">
+    <IgnyteMark size={80} />
+    <h1 class="mt-6 text-headline max-w-2xl">
+      Book the lesson.<br /><span class="ignite-text">Watch the skills land.</span>
     </h1>
-    <p class="mt-4 max-w-md text-mist-400">
-      Book 1-2-1 private lessons, track tumble &amp; all-star dance skill progression, and manage
-      your club — all in one place.
+    <p class="mt-4 max-w-lg text-mist-400">
+      Ignyte Club Manager is the private-lesson platform built for cheer tumble and all-star dance —
+      the only one where every 1-2-1 moves a skill journey forward.
     </p>
     <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
       <a href="/login" class="btn btn-primary">Sign in</a>
       <a href="/signup" class="btn btn-ghost">Create an account</a>
     </div>
-    <p class="mt-10 text-xs text-mist-500">
+    <p class="mt-8 text-xs text-mist-500">
       Works offline · Installable from your browser · Free
     </p>
+  </section>
+
+  <section class="grid gap-4 sm:grid-cols-2 max-w-3xl mx-auto pb-16 animate-fade">
+    {
+      features.map((f) => (
+        <div class="surface-card p-5 text-left">
+          <p class="text-2xl">{f.emoji}</p>
+          <h2 class="mt-2 text-base font-semibold">{f.title}</h2>
+          <p class="mt-1 text-sm text-mist-400">{f.body}</p>
+        </div>
+      ))
+    }
   </section>
 
   <script>

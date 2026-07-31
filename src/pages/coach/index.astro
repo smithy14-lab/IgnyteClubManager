@@ -44,6 +44,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       skillStatusLabels,
       skillStatusOrder,
     } from '../../lib/app';
+    import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../../lib/calendar';
 
     const content = document.getElementById('content')!;
     let me: Awaited<ReturnType<typeof requireAuth>>;
@@ -129,12 +130,17 @@ import AppLayout from '../../layouts/AppLayout.astro';
     }
 
     // ---------------- My lessons + register ----------------
+    let lessonView: 'tiles' | 'calendar' =
+      (localStorage.getItem('icm-coach-view') as 'tiles' | 'calendar') ?? 'tiles';
+    const calCursor = new Date();
+
     async function renderLessons() {
+      if (lessonView === 'calendar') return renderLessonsCalendar();
       const from = new Date();
       from.setDate(from.getDate() - 7); // last week still needs its register
       const { data } = await supabase
         .from('bookings')
-        .select('*, slots(slot_date, start_time, end_time), athletes(id, name)')
+        .select('*, slots(slot_date, start_time, end_time, locations(name)), athletes(id, name)')
         .eq('coach_id', me.id)
         .eq('status', 'booked')
         .gte('slots.slot_date', from.toISOString().slice(0, 10));
@@ -148,14 +154,16 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
       if (!lessons.length) {
         content.innerHTML =
+          lessonToggleHtml() +
           '<div class="surface-card p-8 text-center text-sm text-mist-500">No lessons booked with you yet. Join some slots so families can book you.</div>';
+        wireLessonToggle();
         return;
       }
 
       const byDate = new Map<string, typeof lessons>();
       lessons.forEach((b) => (byDate.get(b.slots.slot_date) ?? byDate.set(b.slots.slot_date, []).get(b.slots.slot_date)!).push(b));
 
-      content.innerHTML = [...byDate.entries()]
+      content.innerHTML = lessonToggleHtml() + [...byDate.entries()]
         .map(
           ([date, day]) => `
         <h2 class="text-sm font-display font-semibold uppercase tracking-widest ${date === today ? 'text-ignite-400' : 'text-mist-400'} mt-5 mb-2">
@@ -169,6 +177,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
             <div class="surface-card p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p class="font-display font-semibold">${fmtTime(b.slots.start_time)}–${fmtTime(b.slots.end_time)} — ${esc(b.athletes?.name)}</p>
+                <p class="text-xs text-mist-500 mt-0.5">${esc(b.slots.locations?.name ?? '')}${b.discipline_focus ? ` · ${b.discipline_focus === 'both' ? 'tumble + dance' : b.discipline_focus}` : ''}</p>
                 ${
                   b.attendance
                     ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'} mt-1">${b.attendance === 'present' ? 'Present' : 'Absent'}</span>`
@@ -193,6 +202,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         )
         .join('');
 
+      wireLessonToggle();
       content.querySelectorAll<HTMLButtonElement>('[data-present]').forEach((b) =>
         b.addEventListener('click', () => mark(b.dataset.present!, 'present'))
       );
@@ -212,6 +222,67 @@ import AppLayout from '../../layouts/AppLayout.astro';
         b.addEventListener('click', () =>
           openProgress(b.dataset.progress!, b.dataset.name ?? '', b.dataset.booking!)
         )
+      );
+    }
+
+    function lessonToggleHtml(): string {
+      return `<div class="flex justify-end mb-3" id="lesson-toggle">${renderViewToggle(lessonView)}</div>`;
+    }
+    function wireLessonToggle() {
+      document
+        .querySelectorAll<HTMLButtonElement>('#lesson-toggle [data-view]')
+        .forEach((b) =>
+          b.addEventListener('click', () => {
+            lessonView = b.dataset.view as 'tiles' | 'calendar';
+            localStorage.setItem('icm-coach-view', lessonView);
+            render();
+          })
+        );
+    }
+
+    async function renderLessonsCalendar() {
+      const y = calCursor.getFullYear();
+      const m = calCursor.getMonth();
+      const { data } = await supabase
+        .from('bookings')
+        .select('*, slots!inner(slot_date, start_time, end_time, locations(name)), athletes(id, name)')
+        .eq('coach_id', me.id)
+        .eq('status', 'booked')
+        .gte('slots.slot_date', `${y}-${String(m + 1).padStart(2, '0')}-01`)
+        .lte('slots.slot_date', isoDate(new Date(y, m + 1, 0)));
+      const lessons = (data ?? []).filter((b) => b.slots);
+      const today = isoDate(new Date());
+
+      const chips = new Map<string, CalChip[]>();
+      for (const b of lessons.sort((a, c) => a.slots.start_time.localeCompare(c.slots.start_time))) {
+        const tone =
+          b.attendance === 'present' ? 'ok'
+          : b.attendance === 'absent' ? 'danger'
+          : b.slots.slot_date <= today ? 'warn'
+          : 'accent';
+        (chips.get(b.slots.slot_date) ?? chips.set(b.slots.slot_date, []).get(b.slots.slot_date)!).push({
+          id: b.id,
+          label: `${fmtTime(b.slots.start_time)} ${b.athletes?.name?.split(' ')[0] ?? ''}`,
+          tone,
+          title: `${b.athletes?.name ?? ''} · ${b.slots.locations?.name ?? ''}${b.discipline_focus ? ' · ' + b.discipline_focus : ''}`,
+        });
+      }
+
+      content.innerHTML = lessonToggleHtml() + renderMonthCalendar(y, m, chips);
+      wireLessonToggle();
+      content.querySelector('[data-cal-prev]')?.addEventListener('click', () => {
+        calCursor.setMonth(calCursor.getMonth() - 1);
+        renderLessonsCalendar();
+      });
+      content.querySelector('[data-cal-next]')?.addEventListener('click', () => {
+        calCursor.setMonth(calCursor.getMonth() + 1);
+        renderLessonsCalendar();
+      });
+      content.querySelectorAll<HTMLButtonElement>('[data-chip]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          const b = lessons.find((l) => l.id === btn.dataset.chip);
+          if (b) openProgress(b.athletes.id, b.athletes.name, b.id);
+        })
       );
     }
 

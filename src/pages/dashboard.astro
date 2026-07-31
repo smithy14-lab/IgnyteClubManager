@@ -34,6 +34,24 @@ import AppLayout from '../layouts/AppLayout.astro';
         const athletes = await myAthletes();
         const athleteIds = athletes.map((a) => a.id);
 
+        // Skill progress per athlete (achieved+mastered / total skills)
+        const progressMap = new Map<string, { pct: number; mastered: number; working: number }>();
+        if (athleteIds.length) {
+          const [{ count: totalSkills }, { data: statuses }] = await Promise.all([
+            supabase.from('skills').select('*', { count: 'exact', head: true }),
+            supabase.from('athlete_skills').select('athlete_id, status').in('athlete_id', athleteIds),
+          ]);
+          for (const id of athleteIds) {
+            const mine = (statuses ?? []).filter((s) => s.athlete_id === id);
+            const done = mine.filter((s) => s.status === 'achieved' || s.status === 'mastered').length;
+            progressMap.set(id, {
+              pct: totalSkills ? Math.round((done / totalSkills) * 100) : 0,
+              mastered: mine.filter((s) => s.status === 'mastered').length,
+              working: mine.filter((s) => s.status === 'working_on').length,
+            });
+          }
+        }
+
         // Upcoming lessons
         const { data: bookings } = athleteIds.length
           ? await supabase
@@ -102,13 +120,21 @@ import AppLayout from '../layouts/AppLayout.astro';
             ${
               athletes.length
                 ? athletes
-                    .map(
-                      (a) => `
-                <div class="py-2.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
-                  <p class="text-sm font-medium">${esc(a.name)}</p>
-                  <a class="btn btn-ghost btn-sm" href="/progress?athlete=${a.id}">Progress</a>
-                </div>`
-                    )
+                    .map((a) => {
+                      const p = progressMap.get(a.id) ?? { pct: 0, mastered: 0, working: 0 };
+                      return `
+                <div class="py-3 border-t border-ink-700 first:border-0">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-sm font-medium">${esc(a.name)}</p>
+                    <a class="btn btn-ghost btn-sm" href="/progress?athlete=${a.id}">Journey →</a>
+                  </div>
+                  <div class="mt-2 flex items-center gap-2.5">
+                    <div class="progress-track flex-1"><div class="progress-fill" style="width:${p.pct}%"></div></div>
+                    <span class="text-xs font-display font-bold ignite-text">${p.pct}%</span>
+                  </div>
+                  <p class="text-[0.68rem] text-mist-500 mt-1">🔥 ${p.mastered} mastered · 💪 ${p.working} in training</p>
+                </div>`;
+                    })
                     .join('')
                 : `<p class="text-sm text-mist-500">${
                     profile.role === 'parent'

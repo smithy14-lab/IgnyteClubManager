@@ -102,10 +102,15 @@ import AppLayout from '../layouts/AppLayout.astro';
               <div>
                 <p class="text-sm font-medium">${fmtDate(b.slots.slot_date)} · ${fmtTime(b.slots.start_time)}–${fmtTime(b.slots.end_time)}</p>
                 <p class="text-xs text-mist-400 mt-0.5">${esc(b.athletes?.name)} with ${esc(b.profiles?.full_name)}
+                  ${b.discipline_focus ? ` · ${b.discipline_focus === 'both' ? 'tumble + dance' : b.discipline_focus}` : ''}
                   ${b.series_booking_id ? ' · <span class="text-ignite-400">weekly</span>' : ''}
                 </p>
               </div>
-              <button class="btn btn-danger btn-sm" data-cancel="${b.id}" data-late="${isLate ? '1' : ''}">Cancel</button>
+              <div class="flex gap-1.5">
+                <button class="btn btn-ghost btn-sm" title="Add to your calendar"
+                  data-ics="${b.slots.slot_date}|${b.slots.start_time}|${b.slots.end_time}|${esc(b.athletes?.name ?? '')}|${esc(b.profiles?.full_name ?? '')}">📅</button>
+                <button class="btn btn-danger btn-sm" data-cancel="${b.id}" data-late="${isLate ? '1' : ''}">Cancel</button>
+              </div>
             </div>`;
                 })
                 .join('')
@@ -151,6 +156,32 @@ import AppLayout from '../layouts/AppLayout.astro';
     }
 
     function wire() {
+      // "Add to calendar" — downloads a standard .ics the phone opens natively.
+      content.querySelectorAll<HTMLButtonElement>('[data-ics]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const [date, start, end, athlete, coach] = (b.dataset.ics ?? '').split('|');
+          const d = date.replace(/-/g, '');
+          const ics = [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//Ignyte Club Manager//EN',
+            'BEGIN:VEVENT',
+            `UID:${d}${start.replace(':', '')}-${athlete.replace(/\W/g, '')}@ignyte`,
+            `DTSTART:${d}T${start.replace(':', '')}00`,
+            `DTEND:${d}T${end.replace(':', '')}00`,
+            `SUMMARY:${athlete} — 1-2-1 with ${coach}`,
+            'END:VEVENT',
+            'END:VCALENDAR',
+          ].join('\r\n');
+          const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `ignyte-lesson-${date}.ics`;
+          a.click();
+          URL.revokeObjectURL(url);
+        })
+      );
+
       content.querySelectorAll<HTMLButtonElement>('[data-cancel]').forEach((b) =>
         b.addEventListener('click', async () => {
           const warning = b.dataset.late

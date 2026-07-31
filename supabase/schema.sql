@@ -123,6 +123,7 @@ create table public.booking_series (
   athlete_id uuid not null references public.athletes (id) on delete cascade,
   coach_id uuid not null references public.profiles (id),
   booked_by uuid not null references public.profiles (id),
+  discipline_focus text check (discipline_focus in ('tumble', 'dance', 'both')),
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -134,6 +135,7 @@ create table public.bookings (
   coach_id uuid not null references public.profiles (id),
   booked_by uuid not null references public.profiles (id),
   series_booking_id uuid references public.booking_series (id) on delete set null,
+  discipline_focus text check (discipline_focus in ('tumble', 'dance', 'both')),
   status public.booking_status not null default 'booked',
   attendance public.attendance_status,
   attendance_marked_by uuid references public.profiles (id),
@@ -633,9 +635,11 @@ begin
 end;
 $$;
 
--- Parent/adult athlete: book a slot (one-off, or weekly across the series).
+-- Parent/adult athlete: book a slot (one-off, or weekly across the series),
+-- with a discipline focus the chosen coach must cover.
 create or replace function public.book_slot (
-  p_slot_id uuid, p_athlete_id uuid, p_coach_id uuid, p_weekly boolean default false
+  p_slot_id uuid, p_athlete_id uuid, p_coach_id uuid,
+  p_weekly boolean default false, p_discipline text default null
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_slot slots%rowtype;
@@ -644,10 +648,26 @@ declare
   v_skipped int := 0;
   v_athlete text;
   v_when text;
+  v_ds text[];
+  v_bid uuid;
   r record;
 begin
   if not (owns_athlete(p_athlete_id) or is_admin()) then
     raise exception 'You can only book for your own athletes.';
+  end if;
+
+  if p_discipline is not null then
+    if p_discipline not in ('tumble', 'dance', 'both') then
+      raise exception 'Discipline must be tumble, dance or both.';
+    end if;
+    select disciplines into v_ds from coach_profiles where coach_id = p_coach_id;
+    if v_ds is not null then
+      if p_discipline = 'both' and not (v_ds @> array['tumble', 'dance']) then
+        raise exception 'That coach doesn''t cover both disciplines.';
+      elsif p_discipline in ('tumble', 'dance') and not (p_discipline = any (v_ds)) then
+        raise exception 'That coach doesn''t coach %.', p_discipline;
+      end if;
+    end if;
   end if;
 
   select * into v_slot from slots where id = p_slot_id;
@@ -659,14 +679,15 @@ begin
     if v_slot.series_id is null then
       raise exception 'This slot is a one-off and can''t be booked weekly.';
     end if;
-    insert into booking_series (series_id, athlete_id, coach_id, booked_by)
-    values (v_slot.series_id, p_athlete_id, p_coach_id, auth.uid())
+    insert into booking_series (series_id, athlete_id, coach_id, booked_by, discipline_focus)
+    values (v_slot.series_id, p_athlete_id, p_coach_id, auth.uid(), p_discipline)
     returning id into v_series_booking;
 
     for r in select * from slots s where s.series_id = v_slot.series_id
              and s.slot_date >= v_slot.slot_date order by s.slot_date loop
       begin
-        perform _create_booking(r.id, p_athlete_id, p_coach_id, auth.uid(), v_series_booking, is_admin());
+        v_bid := _create_booking(r.id, p_athlete_id, p_coach_id, auth.uid(), v_series_booking, is_admin());
+        update bookings set discipline_focus = p_discipline where id = v_bid;
         v_booked := v_booked + 1;
       exception when others then
         v_skipped := v_skipped + 1;
@@ -679,15 +700,18 @@ begin
       v_booked || ' weekly lessons booked from ' || v_when || '.',
       jsonb_build_object('series_booking_id', v_series_booking));
     perform notify(p_coach_id, 'new_booking', 'New weekly booking',
-      v_athlete || ' booked ' || v_booked || ' weekly lessons with you from ' || v_when || '.',
+      v_athlete || ' booked ' || v_booked || ' weekly lessons with you from ' || v_when
+      || coalesce(' (' || p_discipline || ')', '') || '.',
       jsonb_build_object('series_booking_id', v_series_booking));
     return jsonb_build_object('series_booking_id', v_series_booking, 'booked', v_booked, 'skipped', v_skipped);
   else
-    perform _create_booking(p_slot_id, p_athlete_id, p_coach_id, auth.uid(), null, is_admin());
+    v_bid := _create_booking(p_slot_id, p_athlete_id, p_coach_id, auth.uid(), null, is_admin());
+    update bookings set discipline_focus = p_discipline where id = v_bid;
     perform notify(auth.uid(), 'booking_confirmed', 'Lesson booked',
       'Lesson booked for ' || v_when || '.', jsonb_build_object('slot_id', p_slot_id));
     perform notify(p_coach_id, 'new_booking', 'New booking',
-      v_athlete || ' booked a lesson with you on ' || v_when || '.',
+      v_athlete || ' booked a lesson with you on ' || v_when
+      || coalesce(' (' || p_discipline || ')', '') || '.',
       jsonb_build_object('slot_id', p_slot_id));
     return jsonb_build_object('booked', 1, 'skipped', 0);
   end if;
@@ -930,19 +954,43 @@ begin
 end;
 $$;
 
+-- Celebrate progression: when a coach marks a skill achieved/mastered, the
+-- family gets a milestone notification (and email, via the webhook).
 create or replace function public.update_athlete_skill (
   p_athlete_id uuid, p_skill_id int, p_status public.skill_status, p_notes text default null
 ) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_old public.skill_status;
+  v_owner uuid;
+  v_athlete text;
+  v_skill text;
 begin
   if not (is_admin() or (is_coach() and coach_teaches_athlete(p_athlete_id))) then
     raise exception 'Only the athlete''s coaches can update their skills.';
   end if;
+
+  select status into v_old from athlete_skills
+    where athlete_id = p_athlete_id and skill_id = p_skill_id;
+
   insert into athlete_skills (athlete_id, skill_id, status, notes, updated_by, updated_at)
   values (p_athlete_id, p_skill_id, p_status, p_notes, auth.uid(), now())
   on conflict (athlete_id, skill_id)
   do update set status = excluded.status,
                 notes = coalesce(excluded.notes, athlete_skills.notes),
                 updated_by = excluded.updated_by, updated_at = now();
+
+  if p_status in ('achieved', 'mastered') and (v_old is null or v_old < p_status) then
+    select coalesce(a.parent_id, a.profile_id), a.name into v_owner, v_athlete
+      from athletes a where a.id = p_athlete_id;
+    select name into v_skill from skills where id = p_skill_id;
+    if v_owner is not null then
+      perform notify(v_owner, 'skill_milestone',
+        case when p_status = 'mastered' then '🏆 Skill mastered!' else '🎉 New skill achieved!' end,
+        v_athlete || ' just ' || case when p_status = 'mastered' then 'mastered' else 'achieved' end
+        || ' their ' || v_skill || '!',
+        jsonb_build_object('athlete_id', p_athlete_id, 'skill_id', p_skill_id, 'status', p_status));
+    end if;
+  end if;
 end;
 $$;
 
@@ -1103,7 +1151,7 @@ insert into public.skills (discipline, category, name, level, sort) values
 revoke execute on all functions in schema public from public, anon, authenticated;
 
 grant execute on function
-  public.book_slot (uuid, uuid, uuid, boolean),
+  public.book_slot (uuid, uuid, uuid, boolean, text),
   public.cancel_booking (uuid),
   public.cancel_booking_series (uuid),
   public.join_waitlist (uuid, uuid, uuid),

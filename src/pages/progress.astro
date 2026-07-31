@@ -4,88 +4,178 @@ import AppLayout from '../layouts/AppLayout.astro';
 
 <AppLayout title="Progression">
   <p class="eyebrow">Progression</p>
-  <div class="flex flex-wrap items-center justify-between gap-3 mt-1 mb-5">
-    <h1 class="text-2xl">Skill progression</h1>
+  <div class="flex flex-wrap items-center justify-between gap-3 mt-1 mb-4">
+    <h1 class="text-2xl">Skill journey</h1>
     <select id="athlete-picker" class="field !w-auto hidden"></select>
   </div>
+  <div id="disc-tabs" class="flex gap-2 mb-5"></div>
   <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <style>
+    .ring-wrap { position: relative; width: 110px; height: 110px; flex-shrink: 0; }
+    .ring-pct {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+    .badge-tile {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.35rem 0.8rem; border-radius: 999px;
+      font-size: 0.75rem; font-weight: 700; color: #fff;
+      background: linear-gradient(120deg, var(--color-charge-400), var(--color-ignite-500), var(--color-spark-500));
+      box-shadow: 0 4px 16px -6px color-mix(in srgb, var(--color-ignite-500) 60%, transparent);
+    }
+    .lvl-path { display: flex; align-items: center; gap: 0; overflow-x: auto; padding: 0.25rem 0; }
+    .lvl-node {
+      width: 2.4rem; height: 2.4rem; border-radius: 999px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-display); font-weight: 700; font-size: 0.8rem;
+      border: 2px solid var(--color-ink-600); color: var(--color-mist-500);
+      background: var(--color-ink-900);
+    }
+    .lvl-node.partial { border-color: var(--color-ignite-500); color: var(--color-ignite-400); }
+    .lvl-node.complete {
+      border-color: transparent; color: #fff;
+      background: linear-gradient(135deg, var(--color-charge-400), var(--color-ignite-500), var(--color-spark-500));
+      box-shadow: var(--shadow-glow);
+    }
+    .lvl-link { width: 1.4rem; height: 2px; background: var(--color-ink-600); flex-shrink: 0; }
+    .lvl-link.lit { background: linear-gradient(90deg, var(--color-ignite-500), var(--color-spark-500)); }
+    .skill-row.mastered { background: color-mix(in srgb, var(--color-ignite-500) 6%, transparent); border-radius: 0.5rem; }
+  </style>
 
   <script>
     import { supabase } from '../lib/supabase';
-    import {
-      requireAuth,
-      myAthletes,
-      esc,
-      toast,
-      errMsg,
-      fmtDateTime,
-      skillStatusLabels,
-    } from '../lib/app';
+    import { requireAuth, myAthletes, esc, toast, errMsg, fmtDateTime } from '../lib/app';
 
     const content = document.getElementById('content')!;
     const picker = document.getElementById('athlete-picker') as HTMLSelectElement;
+    const discTabs = document.getElementById('disc-tabs')!;
 
-    const statusPill: Record<string, string> = {
-      not_started: 'pill',
-      working_on: 'pill pill-warn',
-      achieved: 'pill pill-accent',
-      mastered: 'pill pill-success',
+    type Disc = 'all' | 'tumble' | 'dance';
+    let disc: Disc = 'all';
+    let currentAthlete = '';
+
+    const statusMeta: Record<string, { emoji: string; label: string; pill: string }> = {
+      not_started: { emoji: '⚪', label: 'Not started', pill: 'pill' },
+      working_on: { emoji: '💪', label: 'Working on', pill: 'pill pill-warn' },
+      achieved: { emoji: '⭐', label: 'Achieved', pill: 'pill pill-accent' },
+      mastered: { emoji: '🔥', label: 'Mastered', pill: 'pill pill-success' },
     };
 
+    function ring(pct: number): string {
+      const r = 52;
+      const c = 2 * Math.PI * r;
+      return `
+        <div class="ring-wrap">
+          <svg width="110" height="110" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="${r}" stroke="var(--color-ink-700)" stroke-width="11" fill="none"/>
+            <circle cx="60" cy="60" r="${r}" stroke="url(#ignyte-flame-gradient)" stroke-width="11" fill="none"
+              stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}"
+              stroke-dashoffset="${(c * (1 - pct / 100)).toFixed(1)}" transform="rotate(-90 60 60)"
+              style="transition: stroke-dashoffset 0.8s var(--ease-spring)"/>
+          </svg>
+          <div class="ring-pct">
+            <span class="font-display font-bold text-2xl ignite-text">${pct}%</span>
+            <span class="text-[0.6rem] text-mist-500 uppercase tracking-widest">skills</span>
+          </div>
+        </div>`;
+    }
+
+    function renderTabs(trained: Set<string>) {
+      const tabs: [Disc, string][] = [
+        ['all', 'Everything'],
+        ['tumble', `Tumble${trained.has('tumble') ? ' 🏃' : ''}`],
+        ['dance', `Dance${trained.has('dance') ? ' 💃' : ''}`],
+      ];
+      discTabs.innerHTML = tabs
+        .map(
+          ([d, label]) =>
+            `<button data-disc="${d}" class="btn ${d === disc ? 'btn-primary' : 'btn-ghost'} btn-sm">${label}</button>`
+        )
+        .join('');
+      discTabs.querySelectorAll<HTMLButtonElement>('[data-disc]').forEach((b) =>
+        b.addEventListener('click', () => {
+          disc = b.dataset.disc as Disc;
+          renderTabs(trained);
+          render(currentAthlete);
+        })
+      );
+    }
+
     async function render(athleteId: string) {
-      const [{ data: skills }, { data: statuses }, { data: notes }, { data: athlete }] =
-        await Promise.all([
-          supabase.from('skills').select('*').order('sort'),
-          supabase.from('athlete_skills').select('*').eq('athlete_id', athleteId),
-          supabase
-            .from('progress_notes')
-            .select('*, profiles!progress_notes_coach_id_fkey(full_name)')
-            .eq('athlete_id', athleteId)
-            .order('created_at', { ascending: false })
-            .limit(30),
-          supabase.from('athletes').select('name').eq('id', athleteId).single(),
-        ]);
-
-      if (!athlete) {
-        content.innerHTML = '<p class="text-sm text-mist-500">Athlete not found.</p>';
-        return;
-      }
-
+      currentAthlete = athleteId;
+      const [{ data: skills }, { data: statuses }, { data: notes }] = await Promise.all([
+        supabase.from('skills').select('*').order('sort'),
+        supabase.from('athlete_skills').select('*').eq('athlete_id', athleteId),
+        supabase
+          .from('progress_notes')
+          .select('*, profiles!progress_notes_coach_id_fkey(full_name)')
+          .eq('athlete_id', athleteId)
+          .order('created_at', { ascending: false })
+          .limit(30),
+      ]);
       const statusMap = new Map((statuses ?? []).map((s) => [s.skill_id, s]));
 
-      const renderDiscipline = (disc: 'tumble' | 'dance', label: string) => {
-        const dSkills = (skills ?? []).filter((s) => s.discipline === disc);
+      const section = (d: 'tumble' | 'dance', label: string, emoji: string) => {
+        const dSkills = (skills ?? []).filter((s) => s.discipline === d);
         if (!dSkills.length) return '';
-        const done = dSkills.filter((s) => {
-          const st = statusMap.get(s.id)?.status;
-          return st === 'achieved' || st === 'mastered';
-        }).length;
+        const done = dSkills.filter((s) => ['achieved', 'mastered'].includes(statusMap.get(s.id)?.status ?? '')).length;
+        const mastered = dSkills.filter((s) => statusMap.get(s.id)?.status === 'mastered');
+        const working = dSkills.filter((s) => statusMap.get(s.id)?.status === 'working_on').length;
         const pct = Math.round((done / dSkills.length) * 100);
+
+        // Level journey nodes
+        const levels = [...new Set(dSkills.map((s) => s.level))].sort((a, b) => a - b);
+        const lvlNodes = levels
+          .map((lvl, i) => {
+            const inLvl = dSkills.filter((s) => s.level === lvl);
+            const lvlDone = inLvl.filter((s) => ['achieved', 'mastered'].includes(statusMap.get(s.id)?.status ?? '')).length;
+            const cls = lvlDone === inLvl.length ? 'complete' : lvlDone > 0 ? 'partial' : '';
+            const link = i > 0 ? `<div class="lvl-link ${cls ? 'lit' : ''}"></div>` : '';
+            return `${link}<div class="lvl-node ${cls}" title="Level ${lvl}: ${lvlDone}/${inLvl.length} skills">${lvl}</div>`;
+          })
+          .join('');
 
         const cats = new Map<string, typeof dSkills>();
         dSkills.forEach((s) => (cats.get(s.category) ?? cats.set(s.category, []).get(s.category)!).push(s));
 
-        return `<div class="surface-card p-5 mb-5">
-          <div class="flex items-center justify-between gap-3 mb-2">
-            <h2 class="text-lg">${label}</h2>
-            <span class="text-sm text-mist-400">${done}/${dSkills.length} skills</span>
+        return `<div class="surface-card p-5 mb-5 animate-rise">
+          <div class="flex flex-wrap items-center gap-5">
+            ${ring(pct)}
+            <div class="flex-1 min-w-[12rem]">
+              <h2 class="text-lg">${emoji} ${label}</h2>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <span class="pill pill-success">🔥 ${mastered.length} mastered</span>
+                <span class="pill pill-accent">⭐ ${done - mastered.length} achieved</span>
+                <span class="pill pill-warn">💪 ${working} in training</span>
+              </div>
+              <div class="lvl-path mt-4">${lvlNodes}</div>
+              <p class="text-[0.65rem] text-mist-500 mt-1">Level journey — light every level up!</p>
+            </div>
           </div>
-          <div class="progress-track mb-4"><div class="progress-fill" style="width:${pct}%"></div></div>
+          ${
+            mastered.length
+              ? `<div class="mt-4 pt-4 border-t border-ink-700">
+                  <p class="text-xs font-display font-semibold uppercase tracking-widest text-mist-400 mb-2">Badge wall</p>
+                  <div class="flex flex-wrap gap-2">${mastered.map((s) => `<span class="badge-tile">🔥 ${esc(s.name)}</span>`).join('')}</div>
+                </div>`
+              : ''
+          }
           ${[...cats.entries()]
             .map(
               ([cat, catSkills]) => `
-            <h3 class="text-xs font-display font-semibold uppercase tracking-widest text-mist-400 mt-4 mb-1">${esc(cat)}</h3>
+            <h3 class="text-xs font-display font-semibold uppercase tracking-widest text-mist-400 mt-5 mb-1">${esc(cat)}</h3>
             ${catSkills
               .map((s) => {
                 const st = statusMap.get(s.id);
-                const status = st?.status ?? 'not_started';
+                const meta = statusMeta[st?.status ?? 'not_started'];
                 return `
-              <div class="py-2 border-t border-ink-700 flex items-center justify-between gap-2">
+              <div class="skill-row ${st?.status === 'mastered' ? 'mastered' : ''} py-2 px-2 -mx-2 border-t border-ink-700 flex items-center justify-between gap-2">
                 <div>
-                  <p class="text-sm">${esc(s.name)} <span class="text-mist-500 text-xs">· L${s.level}</span></p>
-                  ${st?.notes ? `<p class="text-xs text-mist-500 mt-0.5">${esc(st.notes)}</p>` : ''}
+                  <p class="text-sm">${meta.emoji} ${esc(s.name)} <span class="text-mist-500 text-xs">· L${s.level}</span></p>
+                  ${st?.notes ? `<p class="text-xs text-mist-500 mt-0.5 pl-6">${esc(st.notes)}</p>` : ''}
                 </div>
-                <span class="${statusPill[status]}">${skillStatusLabels[status]}</span>
+                <span class="${meta.pill}">${meta.label}</span>
               </div>`;
               })
               .join('')}`
@@ -95,8 +185,8 @@ import AppLayout from '../layouts/AppLayout.astro';
       };
 
       content.innerHTML =
-        renderDiscipline('tumble', 'Tumble') +
-        renderDiscipline('dance', 'All-star dance') +
+        (disc !== 'dance' ? section('tumble', 'Tumble', '🤸') : '') +
+        (disc !== 'tumble' ? section('dance', 'All-star dance', '💃') : '') +
         `<div class="surface-card p-5">
           <h2 class="text-lg mb-3">Coach notes</h2>
           ${
@@ -115,6 +205,30 @@ import AppLayout from '../layouts/AppLayout.astro';
         </div>`;
     }
 
+    async function trainedDisciplines(athleteId: string): Promise<Set<string>> {
+      const { data } = await supabase
+        .from('bookings')
+        .select('discipline_focus')
+        .eq('athlete_id', athleteId)
+        .eq('status', 'booked');
+      const set = new Set<string>();
+      (data ?? []).forEach((b) => {
+        if (b.discipline_focus === 'both') {
+          set.add('tumble');
+          set.add('dance');
+        } else if (b.discipline_focus) set.add(b.discipline_focus);
+      });
+      return set;
+    }
+
+    async function switchAthlete(athleteId: string) {
+      const trained = await trainedDisciplines(athleteId);
+      // Default the view to what they're actually training.
+      disc = trained.size === 1 ? ([...trained][0] as Disc) : 'all';
+      renderTabs(trained);
+      await render(athleteId);
+    }
+
     (async () => {
       await requireAuth();
       const athletes = await myAthletes();
@@ -124,19 +238,16 @@ import AppLayout from '../layouts/AppLayout.astro';
         return;
       }
       const requested = new URLSearchParams(location.search).get('athlete');
-      let current = athletes.find((a) => a.id === requested)?.id ?? athletes[0].id;
+      const start = athletes.find((a) => a.id === requested)?.id ?? athletes[0].id;
 
       if (athletes.length > 1) {
         picker.classList.remove('hidden');
         picker.innerHTML = athletes
-          .map((a) => `<option value="${a.id}" ${a.id === current ? 'selected' : ''}>${esc(a.name)}</option>`)
+          .map((a) => `<option value="${a.id}" ${a.id === start ? 'selected' : ''}>${esc(a.name)}</option>`)
           .join('');
-        picker.addEventListener('change', () => {
-          current = picker.value;
-          render(current);
-        });
+        picker.addEventListener('change', () => switchAthlete(picker.value));
       }
-      await render(current);
+      await switchAthlete(start);
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
     });
