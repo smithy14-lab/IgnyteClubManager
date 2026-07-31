@@ -1,0 +1,17 @@
+{
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json",
+    ".svg": "image/svg+xml"
+  },
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Frame-Options": "SAMEORIGIN"
+  },
+  "routes": [
+    {
+      "route": "/sw.js",
+      "headers": { "Cache-Control": "no-cache" }
+    }
+  ]
+}
