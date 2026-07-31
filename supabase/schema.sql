@@ -66,6 +66,30 @@ create table public.club_settings (
   waitlist_offer_hours int not null default 24
 );
 
+-- Gyms/venues the club coaches at.
+create table public.locations (
+  id uuid primary key default gen_random_uuid (),
+  name text not null,
+  address text,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+-- Per-coach details shown when booking, plus their online-booking cut-off:
+-- normally bookings close booking_notice_mins before the lesson, but when the
+-- coach already has an adjacent lesson at the same location (within an hour
+-- either side) the shorter adjacent cut-off applies — they're already there.
+create table public.coach_profiles (
+  coach_id uuid primary key references public.profiles (id) on delete cascade,
+  disciplines text[] not null default array['tumble', 'dance'],
+  levels text,
+  rate_per_lesson numeric(8, 2),
+  bio text,
+  booking_notice_mins int not null default 120 check (booking_notice_mins between 0 and 10080),
+  booking_notice_adjacent_mins int not null default 15 check (booking_notice_adjacent_mins between 0 and 10080),
+  updated_at timestamptz not null default now()
+);
+
 -- A bookable 30-minute window. capacity = simultaneous 1-2-1 spaces in the
 -- gym. Weekly slots share a series_id (one row per concrete date).
 create table public.slots (
@@ -75,6 +99,7 @@ create table public.slots (
   end_time time not null,
   capacity int not null check (capacity > 0),
   series_id uuid,
+  location_id uuid references public.locations (id),
   notes text,
   created_by uuid references public.profiles (id),
   created_at timestamptz not null default now(),
@@ -289,10 +314,28 @@ create trigger profiles_role_guard
 before update on public.profiles
 for each row execute function public.guard_role_change ();
 
+-- Every coach gets a coach_profiles row automatically (defaults apply until
+-- they or an admin fill it in).
+create or replace function public.ensure_coach_profile () returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.role = 'coach' then
+    insert into coach_profiles (coach_id) values (new.id) on conflict do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger profiles_coach_profile
+after insert or update of role on public.profiles
+for each row execute function public.ensure_coach_profile ();
+
 -- ---------------------------------------------------------------------------
 -- Row-level security
 -- ---------------------------------------------------------------------------
 alter table public.profiles enable row level security;
+alter table public.locations enable row level security;
+alter table public.coach_profiles enable row level security;
 alter table public.athletes enable row level security;
 alter table public.club_settings enable row level security;
 alter table public.slots enable row level security;
@@ -310,6 +353,17 @@ create policy profiles_select on public.profiles for select to authenticated
   using (id = auth.uid() or role = 'coach' or is_admin());
 create policy profiles_update_self on public.profiles for update to authenticated
   using (id = auth.uid() or is_admin()) with check (id = auth.uid() or is_admin());
+
+-- locations: everyone sees them (they're on the timetable); admins manage.
+create policy locations_select on public.locations for select to authenticated using (true);
+create policy locations_admin_write on public.locations for all to authenticated
+  using (is_admin()) with check (is_admin());
+
+-- coach profiles: everyone can read (families pick coaches when booking);
+-- the coach themself and admins can edit.
+create policy coach_profiles_select on public.coach_profiles for select to authenticated using (true);
+create policy coach_profiles_write on public.coach_profiles for all to authenticated
+  using (coach_id = auth.uid() or is_admin()) with check (coach_id = auth.uid() or is_admin());
 
 -- athletes: owners manage their own; coaches can see athletes they teach.
 create policy athletes_select on public.athletes for select to authenticated
@@ -365,33 +419,47 @@ create policy progress_notes_select on public.progress_notes for select to authe
 -- rule themselves, with row locks so simultaneous bookings can't oversell).
 -- ---------------------------------------------------------------------------
 
--- Admin: create a slot, optionally repeated weekly for N weeks (a "series").
+-- Admin: create slots. With just a start time it makes one slot of
+-- p_interval_mins; with an end time it fills the window with back-to-back
+-- 30-min or 1-hour slots. Each time-of-day gets its own weekly series.
 create or replace function public.admin_create_slots (
-  p_date date, p_start time, p_end time, p_capacity int,
-  p_weeks int default 1, p_notes text default null
-) returns uuid  -- series_id (or the single slot's id)
+  p_date date, p_start time, p_capacity int,
+  p_weeks int default 1, p_end time default null, p_interval_mins int default 30,
+  p_location uuid default null, p_notes text default null
+) returns int  -- number of slots created
 language plpgsql security definer set search_path = public as $$
 declare
+  v_loc uuid;
+  v_t time;
+  v_slot_end time;
   v_series uuid;
-  v_id uuid;
+  v_created int := 0;
   i int;
 begin
   if not is_admin() then raise exception 'Only club admins can create slots.'; end if;
   if p_weeks < 1 or p_weeks > 52 then raise exception 'Weeks must be between 1 and 52.'; end if;
+  if p_interval_mins not in (30, 60) then raise exception 'Interval must be 30 or 60 minutes.'; end if;
+  if p_end is not null and p_end <= p_start then raise exception 'End time must be after the start time.'; end if;
 
-  if p_weeks > 1 then
-    v_series := gen_random_uuid();
+  v_loc := coalesce(p_location, (select id from locations where active order by created_at limit 1));
+  if v_loc is null then raise exception 'Add a location first (Admin → Locations).'; end if;
+
+  v_t := p_start;
+  loop
+    v_slot_end := v_t + make_interval(mins => p_interval_mins);
+    exit when p_end is not null and v_slot_end > p_end;
+
+    v_series := case when p_weeks > 1 then gen_random_uuid() end;
     for i in 0 .. p_weeks - 1 loop
-      insert into slots (slot_date, start_time, end_time, capacity, series_id, notes, created_by)
-      values (p_date + (i * 7), p_start, p_end, p_capacity, v_series, p_notes, auth.uid());
+      insert into slots (slot_date, start_time, end_time, capacity, series_id, location_id, notes, created_by)
+      values (p_date + (i * 7), v_t, v_slot_end, p_capacity, v_series, v_loc, p_notes, auth.uid());
+      v_created := v_created + 1;
     end loop;
-    return v_series;
-  else
-    insert into slots (slot_date, start_time, end_time, capacity, notes, created_by)
-    values (p_date, p_start, p_end, p_capacity, p_notes, auth.uid())
-    returning id into v_id;
-    return v_id;
-  end if;
+
+    exit when p_end is null;
+    v_t := v_slot_end;
+  end loop;
+  return v_created;
 end;
 $$;
 
@@ -412,8 +480,8 @@ begin
   if v_last.id is null then raise exception 'Series not found.'; end if;
 
   for i in 1 .. p_weeks loop
-    insert into slots (slot_date, start_time, end_time, capacity, series_id, notes, created_by)
-    values (v_last.slot_date + (i * 7), v_last.start_time, v_last.end_time, v_last.capacity, p_series_id, v_last.notes, auth.uid())
+    insert into slots (slot_date, start_time, end_time, capacity, series_id, location_id, notes, created_by)
+    values (v_last.slot_date + (i * 7), v_last.start_time, v_last.end_time, v_last.capacity, p_series_id, v_last.location_id, v_last.notes, auth.uid())
     returning id into v_new_id;
     v_created := v_created + 1;
 
@@ -509,19 +577,44 @@ end;
 $$;
 
 -- Internal: the one true way a booking row is created. Locks the slot so two
--- parents tapping "book" at the same second can't overfill it.
+-- parents tapping "book" at the same second can't overfill it. Enforces the
+-- coach's online-booking cut-off (relaxed when they have an adjacent lesson
+-- at the same location) unless p_skip_notice — admins bypass it.
 create or replace function public._create_booking (
-  p_slot_id uuid, p_athlete_id uuid, p_coach_id uuid, p_booked_by uuid, p_series_booking_id uuid default null
+  p_slot_id uuid, p_athlete_id uuid, p_coach_id uuid, p_booked_by uuid,
+  p_series_booking_id uuid default null, p_skip_notice boolean default false
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare
   v_slot slots%rowtype;
   v_id uuid;
+  v_notice int;
+  v_adj int;
+  v_adjacent boolean;
 begin
   select * into v_slot from slots where id = p_slot_id for update;
   if v_slot.id is null then raise exception 'Slot not found.'; end if;
   if slot_starts_at(v_slot) < now() then raise exception 'That slot is in the past.'; end if;
   if not exists (select 1 from slot_coaches where slot_id = p_slot_id and coach_id = p_coach_id) then
     raise exception 'That coach is not available in this slot.';
+  end if;
+
+  if not p_skip_notice then
+    select coalesce(cp.booking_notice_mins, 120), coalesce(cp.booking_notice_adjacent_mins, 15)
+      into v_notice, v_adj
+      from (values (1)) as one
+      left join coach_profiles cp on cp.coach_id = p_coach_id;
+    select exists (
+      select 1 from bookings b join slots s2 on s2.id = b.slot_id
+      where b.coach_id = p_coach_id and b.status = 'booked' and s2.id <> v_slot.id
+        and s2.slot_date = v_slot.slot_date
+        and s2.location_id is not distinct from v_slot.location_id
+        and ((s2.end_time <= v_slot.start_time and v_slot.start_time - s2.end_time <= interval '60 minutes')
+          or (s2.start_time >= v_slot.end_time and s2.start_time - v_slot.end_time <= interval '60 minutes'))
+    ) into v_adjacent;
+    if now() > slot_starts_at(v_slot) - make_interval(mins => case when v_adjacent then v_adj else v_notice end) then
+      raise exception 'Online booking with this coach closes % minutes before the lesson — please contact the club.',
+        case when v_adjacent then v_adj else v_notice end;
+    end if;
   end if;
   if exists (select 1 from bookings where slot_id = p_slot_id and coach_id = p_coach_id and status = 'booked') then
     raise exception 'That coach is already booked in this slot.';
@@ -549,6 +642,8 @@ declare
   v_series_booking uuid;
   v_booked int := 0;
   v_skipped int := 0;
+  v_athlete text;
+  v_when text;
   r record;
 begin
   if not (owns_athlete(p_athlete_id) or is_admin()) then
@@ -557,6 +652,8 @@ begin
 
   select * into v_slot from slots where id = p_slot_id;
   if v_slot.id is null then raise exception 'Slot not found.'; end if;
+  select name into v_athlete from athletes where id = p_athlete_id;
+  v_when := to_char(v_slot.slot_date, 'FMDay DD Mon') || ' at ' || to_char(v_slot.start_time, 'HH24:MI');
 
   if p_weekly then
     if v_slot.series_id is null then
@@ -569,7 +666,7 @@ begin
     for r in select * from slots s where s.series_id = v_slot.series_id
              and s.slot_date >= v_slot.slot_date order by s.slot_date loop
       begin
-        perform _create_booking(r.id, p_athlete_id, p_coach_id, auth.uid(), v_series_booking);
+        perform _create_booking(r.id, p_athlete_id, p_coach_id, auth.uid(), v_series_booking, is_admin());
         v_booked := v_booked + 1;
       exception when others then
         v_skipped := v_skipped + 1;
@@ -579,15 +676,19 @@ begin
       raise exception 'No weeks in this series could be booked with that coach.';
     end if;
     perform notify(auth.uid(), 'booking_confirmed', 'Weekly lesson booked',
-      v_booked || ' weekly lessons booked from ' || to_char(v_slot.slot_date, 'FMDay DD Mon')
-      || ' at ' || to_char(v_slot.start_time, 'HH24:MI') || '.',
+      v_booked || ' weekly lessons booked from ' || v_when || '.',
+      jsonb_build_object('series_booking_id', v_series_booking));
+    perform notify(p_coach_id, 'new_booking', 'New weekly booking',
+      v_athlete || ' booked ' || v_booked || ' weekly lessons with you from ' || v_when || '.',
       jsonb_build_object('series_booking_id', v_series_booking));
     return jsonb_build_object('series_booking_id', v_series_booking, 'booked', v_booked, 'skipped', v_skipped);
   else
-    perform _create_booking(p_slot_id, p_athlete_id, p_coach_id, auth.uid());
+    perform _create_booking(p_slot_id, p_athlete_id, p_coach_id, auth.uid(), null, is_admin());
     perform notify(auth.uid(), 'booking_confirmed', 'Lesson booked',
-      'Lesson booked for ' || to_char(v_slot.slot_date, 'FMDay DD Mon') || ' at '
-      || to_char(v_slot.start_time, 'HH24:MI') || '.', jsonb_build_object('slot_id', p_slot_id));
+      'Lesson booked for ' || v_when || '.', jsonb_build_object('slot_id', p_slot_id));
+    perform notify(p_coach_id, 'new_booking', 'New booking',
+      v_athlete || ' booked a lesson with you on ' || v_when || '.',
+      jsonb_build_object('slot_id', p_slot_id));
     return jsonb_build_object('booked', 1, 'skipped', 0);
   end if;
 end;
@@ -691,6 +792,15 @@ begin
       || ' lesson was cancelled by the club.', jsonb_build_object('booking_id', p_booking_id));
   end if;
 
+  -- Tell the coach when the family (or the club) cancels their lesson.
+  if v_b.coach_id <> auth.uid() then
+    perform notify(v_b.coach_id, 'booking_cancelled', 'Lesson cancelled',
+      (select name from athletes where id = v_b.athlete_id) || '''s '
+      || to_char(v_slot.slot_date, 'FMDay DD Mon') || ' ' || to_char(v_slot.start_time, 'HH24:MI')
+      || ' lesson was cancelled' || case when v_late then ' (late — still payable)' else '' end || '.',
+      jsonb_build_object('booking_id', p_booking_id));
+  end if;
+
   perform promote_waitlist(v_b.slot_id);
   return jsonb_build_object('late', v_late);
 end;
@@ -790,8 +900,15 @@ begin
   v_coach := coalesce(v_w.requested_coach_id, p_coach_id);
   if v_coach is null then raise exception 'Choose a coach to accept the space.'; end if;
 
-  v_booking := _create_booking(v_w.slot_id, v_w.athlete_id, v_coach, v_w.created_by);
+  -- Accepting an offered space skips the coach's booking cut-off: the club
+  -- offered it, so the short notice is expected.
+  v_booking := _create_booking(v_w.slot_id, v_w.athlete_id, v_coach, v_w.created_by, null, true);
   update waitlist set status = 'booked' where id = p_waitlist_id;
+  perform notify(v_coach, 'new_booking', 'New booking (from waiting list)',
+    (select name from athletes where id = v_w.athlete_id) || ' accepted a waiting-list space with you on '
+    || (select to_char(s.slot_date, 'FMDay DD Mon') || ' at ' || to_char(s.start_time, 'HH24:MI')
+        from slots s where s.id = v_w.slot_id) || '.',
+    jsonb_build_object('booking_id', v_booking));
   return v_booking;
 end;
 $$;
@@ -853,26 +970,73 @@ returns jsonb language sql stable security definer set search_path = public as $
   from (
     select
       s.id, s.slot_date, s.start_time, s.end_time, s.capacity, s.series_id, s.notes,
+      s.location_id, l.name as location,
       (select count(*) from bookings b where b.slot_id = s.id and b.status = 'booked') as booked,
       (select count(*) from waitlist w where w.slot_id = s.id and w.status in ('waiting', 'offered')) as waiting,
       coalesce((
         select jsonb_agg(jsonb_build_object(
           'id', p.id, 'name', p.full_name,
           'busy', exists (select 1 from bookings b2
-                          where b2.slot_id = s.id and b2.coach_id = p.id and b2.status = 'booked')
+                          where b2.slot_id = s.id and b2.coach_id = p.id and b2.status = 'booked'),
+          'disciplines', cp.disciplines, 'levels', cp.levels, 'rate', cp.rate_per_lesson
         ) order by p.full_name)
-        from slot_coaches sc join profiles p on p.id = sc.coach_id
+        from slot_coaches sc
+        join profiles p on p.id = sc.coach_id
+        left join coach_profiles cp on cp.coach_id = p.id
         where sc.slot_id = s.id
       ), '[]'::jsonb) as coaches
     from slots s
+    left join locations l on l.id = s.location_id
     where s.slot_date between p_from and p_to
   ) t
 $$;
+
+-- Nag coaches about registers they haven't taken (runs hourly via pg_cron;
+-- one reminder per booking, an hour after the lesson ended).
+create or replace function public.remind_missing_registers () returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+  v_count int := 0;
+begin
+  for r in
+    select b.id, b.coach_id, a.name as athlete, s.slot_date, s.start_time
+    from bookings b
+    join slots s on s.id = b.slot_id
+    join athletes a on a.id = b.athlete_id
+    where b.status = 'booked' and b.attendance is null
+      and (s.slot_date + s.end_time) at time zone (select timezone from club_settings where id = 1)
+          < now() - interval '1 hour'
+      and not exists (select 1 from notifications n
+                      where n.type = 'register_reminder' and (n.data ->> 'booking_id')::uuid = b.id)
+  loop
+    perform notify(r.coach_id, 'register_reminder', 'Register due',
+      'You haven''t taken the register for ' || r.athlete || ' ('
+      || to_char(r.slot_date, 'FMDay DD Mon') || ' ' || to_char(r.start_time, 'HH24:MI') || ').',
+      jsonb_build_object('booking_id', r.id));
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end;
+$$;
+
+-- Schedule it hourly. pg_cron ships with Supabase; on plain Postgres without
+-- it this block just prints a notice.
+do $cron$
+begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('ignyte-register-reminders', '30 * * * *',
+    'select public.remind_missing_registers()');
+exception when others then
+  raise notice 'pg_cron unavailable (%) — schedule remind_missing_registers() yourself.', sqlerrm;
+end;
+$cron$;
 
 -- ---------------------------------------------------------------------------
 -- Seed data
 -- ---------------------------------------------------------------------------
 insert into public.club_settings (id) values (1);
+insert into public.locations (name) values ('Main Gym');
 
 -- Tumble skill library (levels follow common UK progression order).
 insert into public.skills (discipline, category, name, level, sort) values
@@ -950,7 +1114,7 @@ grant execute on function
   public.take_register (uuid, public.attendance_status),
   public.update_athlete_skill (uuid, integer, public.skill_status, text),
   public.add_progress_note (uuid, text, uuid),
-  public.admin_create_slots (date, time, time, integer, integer, text),
+  public.admin_create_slots (date, time, integer, integer, time, integer, uuid, text),
   public.admin_extend_series (uuid, integer),
   public.admin_delete_slot (uuid),
   public.get_slot_board (date, date),

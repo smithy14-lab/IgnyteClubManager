@@ -9,6 +9,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
   <div class="flex gap-2 mb-5">
     <button id="tab-lessons" class="btn btn-primary btn-sm">My lessons</button>
     <button id="tab-slots" class="btn btn-ghost btn-sm">Join slots</button>
+    <button id="tab-settings" class="btn btn-ghost btn-sm">My settings</button>
   </div>
 
   <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
@@ -46,23 +47,85 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     const content = document.getElementById('content')!;
     let me: Awaited<ReturnType<typeof requireAuth>>;
-    let tab: 'lessons' | 'slots' = 'lessons';
+    let tab: 'lessons' | 'slots' | 'settings' = 'lessons';
 
     const tabLessons = document.getElementById('tab-lessons')!;
     const tabSlots = document.getElementById('tab-slots')!;
-    function setTab(t: 'lessons' | 'slots') {
+    const tabSettings = document.getElementById('tab-settings')!;
+    function setTab(t: 'lessons' | 'slots' | 'settings') {
       tab = t;
       tabLessons.className = t === 'lessons' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
       tabSlots.className = t === 'slots' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+      tabSettings.className = t === 'settings' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
       render();
     }
     tabLessons.addEventListener('click', () => setTab('lessons'));
     tabSlots.addEventListener('click', () => setTab('slots'));
+    tabSettings.addEventListener('click', () => setTab('settings'));
 
     async function render() {
       content.innerHTML = '<p class="text-mist-500 text-sm">Loading…</p>';
       if (tab === 'lessons') await renderLessons();
-      else await renderSlots();
+      else if (tab === 'slots') await renderSlots();
+      else await renderSettings();
+    }
+
+    // ---------------- My settings (coach profile + booking cut-offs) --------
+    async function renderSettings() {
+      const { data: cp } = await supabase.from('coach_profiles').select('*').eq('coach_id', me.id).maybeSingle();
+      const disciplines: string[] = cp?.disciplines ?? ['tumble', 'dance'];
+      content.innerHTML = `
+        <div class="surface-card p-5 max-w-xl">
+          <h2 class="text-base font-semibold mb-1">My coach profile</h2>
+          <p class="text-xs text-mist-500 mb-4">Families see this when booking. The cut-offs control how close to a lesson's start someone can book you online.</p>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label class="form-label">Disciplines</label>
+              <label class="text-sm block"><input type="checkbox" id="cs-tumble" ${disciplines.includes('tumble') ? 'checked' : ''}/> Cheer tumble</label>
+              <label class="text-sm block"><input type="checkbox" id="cs-dance" ${disciplines.includes('dance') ? 'checked' : ''}/> All-star dance</label>
+            </div>
+            <div>
+              <label class="form-label" for="cs-levels">Levels you coach</label>
+              <input class="field" id="cs-levels" value="${esc(cp?.levels ?? '')}" placeholder="e.g. Tumble L1-4" />
+            </div>
+            <div>
+              <label class="form-label" for="cs-rate">Cost per lesson (£)</label>
+              <input class="field" id="cs-rate" type="number" step="0.5" min="0" value="${cp?.rate_per_lesson ?? ''}" />
+            </div>
+            <div></div>
+            <div>
+              <label class="form-label" for="cs-notice">Booking cut-off (minutes before)</label>
+              <input class="field" id="cs-notice" type="number" min="0" max="10080" value="${cp?.booking_notice_mins ?? 120}" />
+              <p class="text-xs text-mist-500 mt-1">Nobody can book you online closer to the lesson than this — e.g. 120 stops someone booking a slot that starts in 5 minutes while you're at home.</p>
+            </div>
+            <div>
+              <label class="form-label" for="cs-adjacent">Cut-off when you're already there (minutes)</label>
+              <input class="field" id="cs-adjacent" type="number" min="0" max="10080" value="${cp?.booking_notice_adjacent_mins ?? 15}" />
+              <p class="text-xs text-mist-500 mt-1">Used instead when you already have a lesson just before or after at the same location.</p>
+            </div>
+          </div>
+          <button class="btn btn-primary mt-5" id="cs-save">Save</button>
+        </div>`;
+
+      document.getElementById('cs-save')?.addEventListener('click', async () => {
+        const ds = [
+          (document.getElementById('cs-tumble') as HTMLInputElement).checked && 'tumble',
+          (document.getElementById('cs-dance') as HTMLInputElement).checked && 'dance',
+        ].filter(Boolean);
+        if (!ds.length) return toast('Pick at least one discipline.', 'err');
+        const rate = (document.getElementById('cs-rate') as HTMLInputElement).value;
+        const { error } = await supabase.from('coach_profiles').upsert({
+          coach_id: me.id,
+          disciplines: ds,
+          levels: (document.getElementById('cs-levels') as HTMLInputElement).value || null,
+          rate_per_lesson: rate ? Number(rate) : null,
+          booking_notice_mins: Number((document.getElementById('cs-notice') as HTMLInputElement).value),
+          booking_notice_adjacent_mins: Number((document.getElementById('cs-adjacent') as HTMLInputElement).value),
+          updated_at: new Date().toISOString(),
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Profile saved.');
+      });
     }
 
     // ---------------- My lessons + register ----------------

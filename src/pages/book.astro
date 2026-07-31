@@ -6,7 +6,7 @@ import AppLayout from '../layouts/AppLayout.astro';
   <p class="eyebrow">Booking</p>
   <h1 class="text-2xl mt-1 mb-5">Find a lesson</h1>
 
-  <div class="surface-card p-4 mb-6 grid gap-3 sm:grid-cols-4">
+  <div class="surface-card p-4 mb-6 grid gap-3 grid-cols-2 sm:grid-cols-5">
     <div>
       <label class="form-label" for="f-from">From</label>
       <input class="field" type="date" id="f-from" />
@@ -14,6 +14,10 @@ import AppLayout from '../layouts/AppLayout.astro';
     <div>
       <label class="form-label" for="f-to">To</label>
       <input class="field" type="date" id="f-to" />
+    </div>
+    <div>
+      <label class="form-label" for="f-loc">Location</label>
+      <select class="field" id="f-loc"><option value="">All locations</option></select>
     </div>
     <div>
       <label class="form-label" for="f-coach">Coach</label>
@@ -77,18 +81,32 @@ import AppLayout from '../layouts/AppLayout.astro';
     import { supabase } from '../lib/supabase';
     import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
 
-    type Coach = { id: string; name: string; busy: boolean };
+    type Coach = {
+      id: string; name: string; busy: boolean;
+      disciplines: string[] | null; levels: string | null; rate: number | null;
+    };
     type Slot = {
       id: string; slot_date: string; start_time: string; end_time: string;
       capacity: number; series_id: string | null; notes: string | null;
+      location_id: string | null; location: string | null;
       booked: number; waiting: number; coaches: Coach[];
     };
 
     const board = document.getElementById('board')!;
     const fFrom = document.getElementById('f-from') as HTMLInputElement;
     const fTo = document.getElementById('f-to') as HTMLInputElement;
+    const fLoc = document.getElementById('f-loc') as HTMLSelectElement;
     const fCoach = document.getElementById('f-coach') as HTMLSelectElement;
     const fTime = document.getElementById('f-time') as HTMLSelectElement;
+
+    function coachLabel(c: Coach): string {
+      const bits = [];
+      if (c.disciplines?.length) {
+        bits.push(c.disciplines.map((d) => (d === 'tumble' ? 'tumble' : 'dance')).join(' + '));
+      }
+      if (c.rate != null) bits.push(`£${c.rate}`);
+      return bits.length ? `${c.name} (${bits.join(' · ')})` : c.name;
+    }
 
     let slots: Slot[] = [];
     let athletes: Awaited<ReturnType<typeof myAthletes>> = [];
@@ -111,7 +129,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       if (error) return toast(errMsg(error), 'err');
       slots = (data ?? []) as Slot[];
 
-      // Coach filter options from what's actually on offer
+      // Coach + location filter options from what's actually on offer
       const coachMap = new Map<string, string>();
       slots.forEach((s) => s.coaches.forEach((c) => coachMap.set(c.id, c.name)));
       const current = fCoach.value;
@@ -122,6 +140,19 @@ import AppLayout from '../layouts/AppLayout.astro';
           .map(([id, name]) => `<option value="${id}">${esc(name)}</option>`)
           .join('');
       fCoach.value = current;
+
+      const locMap = new Map<string, string>();
+      slots.forEach((s) => {
+        if (s.location_id && s.location) locMap.set(s.location_id, s.location);
+      });
+      const currentLoc = fLoc.value;
+      fLoc.innerHTML =
+        '<option value="">All locations</option>' +
+        [...locMap.entries()]
+          .sort((a, b) => a[1].localeCompare(b[1]))
+          .map(([id, name]) => `<option value="${id}">${esc(name)}</option>`)
+          .join('');
+      fLoc.value = currentLoc;
       render();
     }
 
@@ -137,6 +168,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       const now = new Date();
       const filtered = slots.filter((s) => {
         if (!inTimeband(s.start_time)) return false;
+        if (fLoc.value && s.location_id !== fLoc.value) return false;
         if (fCoach.value && !s.coaches.some((c) => c.id === fCoach.value)) return false;
         if (new Date(s.slot_date + 'T' + s.end_time) < now) return false;
         return true;
@@ -171,7 +203,10 @@ import AppLayout from '../layouts/AppLayout.astro';
                   ${bookable ? `${Math.min(free, freeCoaches.length)} space${Math.min(free, freeCoaches.length) === 1 ? '' : 's'}` : 'Full'}
                 </span>
               </div>
-              ${s.series_id ? '<span class="pill pill-accent mt-2">Runs weekly</span>' : ''}
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                ${s.location ? `<span class="pill">${esc(s.location)}</span>` : ''}
+                ${s.series_id ? '<span class="pill pill-accent">Runs weekly</span>' : ''}
+              </div>
               <p class="text-xs text-mist-400 mt-2">
                 ${
                   s.coaches.length
@@ -225,7 +260,8 @@ import AppLayout from '../layouts/AppLayout.astro';
       document.getElementById('panel-title')!.textContent =
         m === 'book' ? 'Book lesson' : 'Join waiting list';
       document.getElementById('panel-sub')!.textContent =
-        `${fmtDate(activeSlot.slot_date)} · ${fmtTime(activeSlot.start_time)}–${fmtTime(activeSlot.end_time)}`;
+        `${fmtDate(activeSlot.slot_date)} · ${fmtTime(activeSlot.start_time)}–${fmtTime(activeSlot.end_time)}` +
+        (activeSlot.location ? ` · ${activeSlot.location}` : '');
       pAthlete.innerHTML = athletes
         .map((a) => `<option value="${a.id}">${esc(a.name)}</option>`)
         .join('');
@@ -236,7 +272,7 @@ import AppLayout from '../layouts/AppLayout.astro';
           : activeSlot.coaches;
       pCoach.innerHTML =
         (m === 'waitlist' ? '<option value="">Any coach</option>' : '') +
-        options.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        options.map((c) => `<option value="${c.id}">${esc(coachLabel(c))}</option>`).join('');
 
       const freq = document.getElementById('p-freq-wrap')!;
       freq.classList.toggle('hidden', m === 'waitlist' || !activeSlot.series_id);
@@ -299,7 +335,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     });
 
     [fFrom, fTo].forEach((el) => el.addEventListener('change', load));
-    [fCoach, fTime].forEach((el) => el.addEventListener('change', render));
+    [fLoc, fCoach, fTime].forEach((el) => el.addEventListener('change', render));
 
     (async () => {
       await requireAuth();

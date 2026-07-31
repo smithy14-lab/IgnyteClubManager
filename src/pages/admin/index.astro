@@ -8,7 +8,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
   <div class="flex flex-wrap gap-2 mb-5">
     <button data-tab="slots" class="tab-btn btn btn-primary btn-sm">Slots</button>
-    <button data-tab="users" class="tab-btn btn btn-ghost btn-sm">People</button>
+    <button data-tab="bookings" class="tab-btn btn btn-ghost btn-sm">Bookings</button>
+    <button data-tab="people" class="tab-btn btn btn-ghost btn-sm">People</button>
+    <button data-tab="locations" class="tab-btn btn btn-ghost btn-sm">Locations</button>
+    <button data-tab="skills" class="tab-btn btn btn-ghost btn-sm">Skills</button>
+    <button data-tab="export" class="tab-btn btn btn-ghost btn-sm">Export</button>
     <button data-tab="settings" class="tab-btn btn btn-ghost btn-sm">Settings</button>
   </div>
 
@@ -20,26 +24,36 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     const content = document.getElementById('content')!;
     let tab = 'slots';
+    type Loc = { id: string; name: string; address: string | null; active: boolean };
+    let locations: Loc[] = [];
 
     document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((b) =>
       b.addEventListener('click', () => {
         tab = b.dataset.tab!;
-        document
-          .querySelectorAll('.tab-btn')
-          .forEach((x) => (x.className = 'tab-btn btn btn-ghost btn-sm'));
+        document.querySelectorAll('.tab-btn').forEach((x) => (x.className = 'tab-btn btn btn-ghost btn-sm'));
         b.className = 'tab-btn btn btn-primary btn-sm';
         render();
       })
     );
 
+    async function loadLocations() {
+      const { data } = await supabase.from('locations').select('*').order('created_at');
+      locations = (data ?? []) as Loc[];
+    }
+
     async function render() {
       content.innerHTML = '<p class="text-mist-500 text-sm">Loading…</p>';
+      await loadLocations();
       if (tab === 'slots') await renderSlots();
-      else if (tab === 'users') await renderUsers();
+      else if (tab === 'bookings') await renderBookings();
+      else if (tab === 'people') await renderPeople();
+      else if (tab === 'locations') await renderLocations();
+      else if (tab === 'skills') await renderSkills();
+      else if (tab === 'export') await renderExport();
       else await renderSettings();
     }
 
-    // ---------------- Slots ----------------
+    // ============================ SLOTS ============================
     async function renderSlots() {
       const from = new Date().toISOString().slice(0, 10);
       const toD = new Date();
@@ -51,30 +65,49 @@ import AppLayout from '../../layouts/AppLayout.astro';
       type Slot = {
         id: string; slot_date: string; start_time: string; end_time: string;
         capacity: number; series_id: string | null; booked: number; waiting: number;
-        coaches: { name: string }[];
+        location: string | null; location_id: string | null;
+        coaches: { id: string; name: string }[];
       };
       const slots = (board ?? []) as Slot[];
 
       content.innerHTML = `
-        <div class="surface-card p-5 mb-6 max-w-xl">
+        <div class="surface-card p-5 mb-6 max-w-2xl">
           <h2 class="text-base font-semibold mb-4">Add slots</h2>
-          <form id="slot-form" class="grid gap-3 sm:grid-cols-2">
+          <form id="slot-form" class="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label class="form-label" for="s-loc">Location</label>
+              <select class="field" id="s-loc">
+                ${locations.filter((l) => l.active).map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join('')}
+              </select>
+            </div>
             <div>
               <label class="form-label" for="s-date">First date</label>
               <input class="field" type="date" id="s-date" required min="${from}" />
             </div>
             <div>
-              <label class="form-label" for="s-start">Start time (30 min lesson)</label>
+              <label class="form-label" for="s-start">Start time</label>
               <input class="field" type="time" id="s-start" required step="300" />
             </div>
             <div>
-              <label class="form-label" for="s-cap">Spaces (simultaneous 1-2-1s)</label>
+              <label class="form-label" for="s-end">End time (optional)</label>
+              <input class="field" type="time" id="s-end" step="300" />
+              <p class="text-xs text-mist-500 mt-1">Fill the window with back-to-back slots.</p>
+            </div>
+            <div id="s-interval-wrap" class="hidden">
+              <label class="form-label" for="s-interval">Slot length</label>
+              <select class="field" id="s-interval">
+                <option value="30">30 minutes</option>
+                <option value="60">1 hour</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" for="s-cap">Spaces per slot</label>
               <input class="field" type="number" id="s-cap" min="1" max="20" value="4" required />
             </div>
             <div>
               <label class="form-label" for="s-weeks">Repeat weekly for</label>
               <select class="field" id="s-weeks">
-                <option value="1">One-off (just this date)</option>
+                <option value="1">Just this date</option>
                 ${[4, 6, 8, 10, 12, 16, 20, 26].map((w) => `<option value="${w}">${w} weeks</option>`).join('')}
               </select>
             </div>
@@ -82,29 +115,34 @@ import AppLayout from '../../layouts/AppLayout.astro';
               <label class="form-label" for="s-notes">Notes (optional)</label>
               <input class="field" id="s-notes" placeholder="e.g. Tumble track only" />
             </div>
-            <button class="btn btn-primary sm:col-span-2" type="submit">Create slot(s)</button>
+            <div class="sm:col-span-3">
+              <button class="btn btn-primary" type="submit">Create slot(s)</button>
+            </div>
           </form>
         </div>
         <h2 class="text-base font-semibold mb-3">Upcoming slots (8 weeks)</h2>
-        <div id="slot-list" class="grid gap-3 sm:grid-cols-2">
+        <div class="grid gap-3 sm:grid-cols-2">
           ${
             slots.length
               ? slots
                   .map(
                     (s) => `
-              <div class="surface-card p-4">
+              <div class="surface-card p-4" data-slot-card="${s.id}">
                 <div class="flex items-center justify-between gap-2">
                   <p class="font-display font-semibold">${fmtDate(s.slot_date)} · ${fmtTime(s.start_time)}–${fmtTime(s.end_time)}</p>
-                  ${s.series_id ? '<span class="pill pill-accent">weekly</span>' : ''}
+                  <div class="flex gap-1.5">
+                    ${s.location ? `<span class="pill">${esc(s.location)}</span>` : ''}
+                    ${s.series_id ? '<span class="pill pill-accent">weekly</span>' : ''}
+                  </div>
                 </div>
-                <p class="text-xs text-mist-400 mt-1.5">
-                  ${s.booked}/${s.capacity} booked${s.waiting ? ` · ${s.waiting} waiting` : ''}
-                </p>
+                <p class="text-xs text-mist-400 mt-1.5">${s.booked}/${s.capacity} booked${s.waiting ? ` · ${s.waiting} waiting` : ''}</p>
                 <p class="text-xs text-mist-500 mt-1">${s.coaches.length ? 'Coaches: ' + s.coaches.map((c) => esc(c.name)).join(', ') : 'No coaches yet'}</p>
                 <div class="mt-3 flex flex-wrap gap-2">
+                  <button class="btn btn-primary btn-sm" data-manage="${s.id}">Manage</button>
                   <button class="btn btn-danger btn-sm" data-del="${s.id}">Remove</button>
                   ${s.series_id ? `<button class="btn btn-ghost btn-sm" data-extend="${s.series_id}">Extend series</button>` : ''}
                 </div>
+                <div class="manage-panel hidden mt-3 pt-3 border-t border-ink-700"></div>
               </div>`
                   )
                   .join('')
@@ -112,23 +150,25 @@ import AppLayout from '../../layouts/AppLayout.astro';
           }
         </div>`;
 
-      const form = document.getElementById('slot-form') as HTMLFormElement;
-      form.addEventListener('submit', async (e) => {
+      const endInput = document.getElementById('s-end') as HTMLInputElement;
+      endInput.addEventListener('input', () =>
+        document.getElementById('s-interval-wrap')!.classList.toggle('hidden', !endInput.value)
+      );
+
+      (document.getElementById('slot-form') as HTMLFormElement).addEventListener('submit', async (e) => {
         e.preventDefault();
-        const start = (document.getElementById('s-start') as HTMLInputElement).value;
-        const [h, m] = start.split(':').map(Number);
-        const endMinutes = h * 60 + m + 30;
-        const end = `${String(Math.floor(endMinutes / 60) % 24).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
-        const { error } = await supabase.rpc('admin_create_slots', {
+        const { data, error } = await supabase.rpc('admin_create_slots', {
           p_date: (document.getElementById('s-date') as HTMLInputElement).value,
-          p_start: start,
-          p_end: end,
+          p_start: (document.getElementById('s-start') as HTMLInputElement).value,
           p_capacity: Number((document.getElementById('s-cap') as HTMLInputElement).value),
           p_weeks: Number((document.getElementById('s-weeks') as HTMLSelectElement).value),
+          p_end: endInput.value || null,
+          p_interval_mins: Number((document.getElementById('s-interval') as HTMLSelectElement).value),
+          p_location: (document.getElementById('s-loc') as HTMLSelectElement).value,
           p_notes: (document.getElementById('s-notes') as HTMLInputElement).value || null,
         });
         if (error) return toast(errMsg(error), 'err');
-        toast('Slot(s) created.');
+        toast(`${data} slot(s) created.`);
         render();
       });
 
@@ -150,53 +190,478 @@ import AppLayout from '../../layouts/AppLayout.astro';
             p_weeks: Number(weeks),
           });
           if (error) return toast(errMsg(error), 'err');
-          toast(`Series extended by ${data} week(s) — weekly bookings rolled forward.`);
+          toast(`Series extended by ${data} week(s).`);
           render();
         })
       );
+      content.querySelectorAll<HTMLButtonElement>('[data-manage]').forEach((b) =>
+        b.addEventListener('click', () => openManage(b.dataset.manage!, slots.find((s) => s.id === b.dataset.manage)!))
+      );
     }
 
-    // ---------------- People ----------------
-    async function renderUsers() {
-      const { data: users } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+    async function openManage(slotId: string, slot: { coaches: { id: string; name: string }[] }) {
+      const card = content.querySelector(`[data-slot-card="${slotId}"]`)!;
+      const panel = card.querySelector('.manage-panel') as HTMLElement;
+      if (!panel.classList.contains('hidden')) {
+        panel.classList.add('hidden');
+        return;
+      }
+      panel.classList.remove('hidden');
+      panel.innerHTML = '<p class="text-xs text-mist-500">Loading…</p>';
+
+      const [{ data: bookings }, { data: waiting }, { data: athletes }] = await Promise.all([
+        supabase
+          .from('bookings')
+          .select('*, athletes(name), profiles!bookings_coach_id_fkey(full_name)')
+          .eq('slot_id', slotId)
+          .eq('status', 'booked'),
+        supabase
+          .from('waitlist')
+          .select('*, athletes(name), profiles!waitlist_requested_coach_id_fkey(full_name)')
+          .eq('slot_id', slotId)
+          .in('status', ['waiting', 'offered']),
+        supabase.from('athletes').select('id, name').order('name'),
+      ]);
+
+      panel.innerHTML = `
+        <p class="text-xs font-semibold text-mist-300 mb-1">Bookings</p>
+        ${
+          (bookings ?? []).length
+            ? (bookings ?? [])
+                .map(
+                  (bk) => `
+            <div class="flex items-center justify-between gap-2 py-1.5">
+              <p class="text-xs">${esc(bk.athletes?.name)} <span class="text-mist-500">with ${esc(bk.profiles?.full_name)}</span>
+                ${bk.attendance ? `<span class="pill ${bk.attendance === 'present' ? 'pill-success' : 'pill-danger'} ml-1">${bk.attendance}</span>` : ''}
+              </p>
+              <button class="btn btn-danger btn-sm" data-cancel-bk="${bk.id}">Cancel</button>
+            </div>`
+                )
+                .join('')
+            : '<p class="text-xs text-mist-500">None yet.</p>'
+        }
+        ${
+          (waiting ?? []).length
+            ? `<p class="text-xs font-semibold text-mist-300 mt-2 mb-1">Waiting list</p>` +
+              (waiting ?? [])
+                .map(
+                  (w) =>
+                    `<p class="text-xs py-0.5">${esc(w.athletes?.name)} <span class="text-mist-500">· ${w.profiles ? esc(w.profiles.full_name) : 'any coach'} · ${w.status}</span></p>`
+                )
+                .join('')
+            : ''
+        }
+        <p class="text-xs font-semibold text-mist-300 mt-3 mb-1">Manually add a booking</p>
+        <div class="flex flex-wrap gap-2">
+          <select class="field !w-auto !py-1 !text-xs" data-add-athlete>
+            ${(athletes ?? []).map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+          </select>
+          <select class="field !w-auto !py-1 !text-xs" data-add-coach>
+            ${slot.coaches.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+          </select>
+          <button class="btn btn-primary btn-sm" data-add-booking>Add</button>
+        </div>`;
+
+      panel.querySelectorAll<HTMLButtonElement>('[data-cancel-bk]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Cancel this booking? The family and coach will be notified.')) return;
+          const { error } = await supabase.rpc('cancel_booking', { p_booking_id: b.dataset.cancelBk });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Booking cancelled.');
+          render();
+        })
+      );
+      panel.querySelector('[data-add-booking]')?.addEventListener('click', async () => {
+        const athleteId = (panel.querySelector('[data-add-athlete]') as HTMLSelectElement).value;
+        const coachId = (panel.querySelector('[data-add-coach]') as HTMLSelectElement).value;
+        if (!athleteId || !coachId) return toast('Pick an athlete and a coach.', 'err');
+        const { error } = await supabase.rpc('book_slot', {
+          p_slot_id: slotId,
+          p_athlete_id: athleteId,
+          p_coach_id: coachId,
+          p_weekly: false,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Booking added.');
+        render();
+      });
+    }
+
+    // ============================ BOOKINGS ============================
+    async function renderBookings() {
+      const today = new Date().toISOString().slice(0, 10);
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      content.innerHTML = `
+        <div class="surface-card p-4 mb-4 flex flex-wrap items-end gap-3">
+          <div><label class="form-label" for="b-from">From</label><input class="field" type="date" id="b-from" value="${weekAgo.toISOString().slice(0, 10)}" /></div>
+          <div><label class="form-label" for="b-to">To</label><input class="field" type="date" id="b-to" value="${today}" /></div>
+          <button id="b-load" class="btn btn-primary btn-sm">Load</button>
+        </div>
+        <div id="b-list"><p class="text-sm text-mist-500">Pick a range and load.</p></div>`;
+
+      const load = async () => {
+        const list = document.getElementById('b-list')!;
+        list.innerHTML = '<p class="text-sm text-mist-500">Loading…</p>';
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('*, slots!inner(slot_date, start_time, end_time, locations(name)), athletes(name), profiles!bookings_coach_id_fkey(full_name)')
+          .gte('slots.slot_date', (document.getElementById('b-from') as HTMLInputElement).value)
+          .lte('slots.slot_date', (document.getElementById('b-to') as HTMLInputElement).value);
+        if (error) return toast(errMsg(error), 'err');
+        const rows = (data ?? []).sort((a, b) =>
+          (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
+        );
+        list.innerHTML = rows.length
+          ? `<div class="surface-card p-4">${rows
+              .map(
+                (bk) => `
+            <div class="py-2.5 border-t border-ink-700 first:border-0 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="text-sm font-medium">${fmtDate(bk.slots.slot_date)} ${fmtTime(bk.slots.start_time)} — ${esc(bk.athletes?.name)} <span class="text-mist-500">with ${esc(bk.profiles?.full_name)}</span></p>
+                <p class="text-xs text-mist-500 mt-0.5">${esc(bk.slots.locations?.name ?? '')} ·
+                  ${bk.status === 'booked' ? 'booked' : `<span class="${bk.status === 'late_cancelled' ? 'text-charge-400' : 'text-mist-400'}">${bk.status === 'late_cancelled' ? 'late cancelled (payable)' : 'cancelled'}</span>`}
+                  ${bk.attendance ? ` · ${bk.attendance}` : ''}
+                </p>
+              </div>
+              ${
+                bk.status === 'booked'
+                  ? `<div class="flex gap-1.5">
+                      <button class="btn btn-ghost btn-sm" data-att="present" data-id="${bk.id}">Present</button>
+                      <button class="btn btn-ghost btn-sm" data-att="absent" data-id="${bk.id}">Absent</button>
+                      <button class="btn btn-danger btn-sm" data-cx="${bk.id}">Cancel</button>
+                    </div>`
+                  : ''
+              }
+            </div>`
+              )
+              .join('')}</div>`
+          : '<p class="text-sm text-mist-500">No bookings in this range.</p>';
+
+        list.querySelectorAll<HTMLButtonElement>('[data-att]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            const { error: e } = await supabase.rpc('take_register', {
+              p_booking_id: b.dataset.id,
+              p_attendance: b.dataset.att,
+            });
+            if (e) return toast(errMsg(e), 'err');
+            toast('Attendance updated.');
+            load();
+          })
+        );
+        list.querySelectorAll<HTMLButtonElement>('[data-cx]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            if (!confirm('Cancel this booking?')) return;
+            const { error: e } = await supabase.rpc('cancel_booking', { p_booking_id: b.dataset.cx });
+            if (e) return toast(errMsg(e), 'err');
+            toast('Cancelled.');
+            load();
+          })
+        );
+      };
+      document.getElementById('b-load')?.addEventListener('click', load);
+      load();
+    }
+
+    // ============================ PEOPLE ============================
+    async function renderPeople() {
+      const [{ data: users }, { data: coachProfiles }] = await Promise.all([
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('coach_profiles').select('*'),
+      ]);
+      const cpMap = new Map((coachProfiles ?? []).map((c) => [c.coach_id, c]));
+
       content.innerHTML = `
         <div class="surface-card p-5">
           <h2 class="text-base font-semibold mb-1">Accounts</h2>
-          <p class="text-xs text-mist-500 mb-3">Change a role to make someone a coach or admin. Coaches appear in booking as soon as they join a slot.</p>
+          <p class="text-xs text-mist-500 mb-3">Change roles here. Coaches get a profile — set their disciplines, levels, cost and booking cut-offs.</p>
           ${(users ?? [])
-            .map(
-              (u) => `
-            <div class="py-3 border-t border-ink-700 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p class="text-sm font-medium">${esc(u.full_name)}</p>
-                <p class="text-xs text-mist-500">${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}</p>
+            .map((u) => {
+              const cp = cpMap.get(u.id);
+              return `
+            <div class="py-3 border-t border-ink-700">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p class="text-sm font-medium">${esc(u.full_name)}</p>
+                  <p class="text-xs text-mist-500">${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}</p>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <select class="field !w-auto !py-1 !text-xs" data-user="${u.id}">
+                    ${['parent', 'athlete', 'coach', 'admin'].map((r) => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${r}</option>`).join('')}
+                  </select>
+                  ${u.role === 'coach' ? `<button class="btn btn-ghost btn-sm" data-coach-edit="${u.id}">Coach profile</button>` : ''}
+                </div>
               </div>
-              <select class="field !w-auto !py-1 !text-xs" data-user="${u.id}">
-                ${['parent', 'athlete', 'coach', 'admin']
-                  .map((r) => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${r}</option>`)
-                  .join('')}
-              </select>
-            </div>`
-            )
+              ${
+                u.role === 'coach'
+                  ? `<div class="coach-editor hidden mt-3 p-3 rounded-lg bg-ink-900 border border-ink-700" data-editor="${u.id}">
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label class="form-label">Disciplines</label>
+                        <label class="text-xs mr-3"><input type="checkbox" data-f="tumble" ${(cp?.disciplines ?? []).includes('tumble') ? 'checked' : ''}/> Cheer tumble</label>
+                        <label class="text-xs"><input type="checkbox" data-f="dance" ${(cp?.disciplines ?? []).includes('dance') ? 'checked' : ''}/> All-star dance</label>
+                      </div>
+                      <div><label class="form-label">Levels coached</label><input class="field !py-1.5 !text-sm" data-f="levels" value="${esc(cp?.levels ?? '')}" placeholder="e.g. Tumble L1-4" /></div>
+                      <div><label class="form-label">Cost per lesson (£)</label><input class="field !py-1.5 !text-sm" type="number" step="0.5" min="0" data-f="rate" value="${cp?.rate_per_lesson ?? ''}" /></div>
+                      <div><label class="form-label">Booking cut-off (mins before)</label><input class="field !py-1.5 !text-sm" type="number" min="0" data-f="notice" value="${cp?.booking_notice_mins ?? 120}" /></div>
+                      <div><label class="form-label">Cut-off with adjacent lesson (mins)</label><input class="field !py-1.5 !text-sm" type="number" min="0" data-f="adjacent" value="${cp?.booking_notice_adjacent_mins ?? 15}" /></div>
+                    </div>
+                    <button class="btn btn-primary btn-sm mt-3" data-coach-save="${u.id}">Save coach profile</button>
+                  </div>`
+                  : ''
+              }
+            </div>`;
+            })
             .join('')}
         </div>`;
 
       content.querySelectorAll<HTMLSelectElement>('[data-user]').forEach((sel) =>
         sel.addEventListener('change', async () => {
-          const { error } = await supabase
-            .from('profiles')
-            .update({ role: sel.value })
-            .eq('id', sel.dataset.user);
+          const { error } = await supabase.from('profiles').update({ role: sel.value }).eq('id', sel.dataset.user);
           if (error) return toast(errMsg(error), 'err');
           toast('Role updated.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-coach-edit]').forEach((b) =>
+        b.addEventListener('click', () =>
+          content.querySelector(`[data-editor="${b.dataset.coachEdit}"]`)?.classList.toggle('hidden')
+        )
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-coach-save]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const ed = content.querySelector(`[data-editor="${b.dataset.coachSave}"]`)!;
+          const val = (f: string) => (ed.querySelector(`[data-f="${f}"]`) as HTMLInputElement).value;
+          const checked = (f: string) => (ed.querySelector(`[data-f="${f}"]`) as HTMLInputElement).checked;
+          const disciplines = [checked('tumble') && 'tumble', checked('dance') && 'dance'].filter(Boolean);
+          if (!disciplines.length) return toast('Pick at least one discipline.', 'err');
+          const { error } = await supabase.from('coach_profiles').upsert({
+            coach_id: b.dataset.coachSave,
+            disciplines,
+            levels: val('levels') || null,
+            rate_per_lesson: val('rate') ? Number(val('rate')) : null,
+            booking_notice_mins: Number(val('notice')),
+            booking_notice_adjacent_mins: Number(val('adjacent')),
+            updated_at: new Date().toISOString(),
+          });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Coach profile saved.');
         })
       );
     }
 
-    // ---------------- Settings ----------------
+    // ============================ LOCATIONS ============================
+    async function renderLocations() {
+      content.innerHTML = `
+        <div class="surface-card p-5 max-w-xl">
+          <h2 class="text-base font-semibold mb-3">Locations</h2>
+          ${locations
+            .map(
+              (l) => `
+            <div class="py-3 border-t border-ink-700 first:border-0 flex flex-wrap items-center gap-2">
+              <input class="field !w-auto flex-1 !py-1.5 !text-sm" value="${esc(l.name)}" data-loc-name="${l.id}" />
+              <button class="btn btn-ghost btn-sm" data-loc-save="${l.id}">Save</button>
+              <button class="btn ${l.active ? 'btn-danger' : 'btn-ghost'} btn-sm" data-loc-toggle="${l.id}" data-active="${l.active}">
+                ${l.active ? 'Disable' : 'Enable'}
+              </button>
+            </div>`
+            )
+            .join('')}
+          <div class="mt-4 pt-4 border-t border-ink-700 flex gap-2">
+            <input class="field flex-1" id="loc-new" placeholder="New location name" />
+            <button class="btn btn-primary btn-sm" id="loc-add">Add</button>
+          </div>
+        </div>`;
+
+      content.querySelectorAll<HTMLButtonElement>('[data-loc-save]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const name = (content.querySelector(`[data-loc-name="${b.dataset.locSave}"]`) as HTMLInputElement).value.trim();
+          if (!name) return;
+          const { error } = await supabase.from('locations').update({ name }).eq('id', b.dataset.locSave);
+          if (error) return toast(errMsg(error), 'err');
+          toast('Location renamed.');
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-loc-toggle]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { error } = await supabase
+            .from('locations')
+            .update({ active: b.dataset.active !== 'true' })
+            .eq('id', b.dataset.locToggle);
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+      document.getElementById('loc-add')?.addEventListener('click', async () => {
+        const name = (document.getElementById('loc-new') as HTMLInputElement).value.trim();
+        if (!name) return;
+        const { error } = await supabase.from('locations').insert({ name });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Location added.');
+        render();
+      });
+    }
+
+    // ============================ SKILLS ============================
+    async function renderSkills() {
+      const { data: skills } = await supabase.from('skills').select('*').order('sort');
+      const groups = new Map<string, NonNullable<typeof skills>>();
+      (skills ?? []).forEach((s) => {
+        const key = `${s.discipline === 'tumble' ? 'Tumble' : 'All-star dance'} — ${s.category}`;
+        (groups.get(key) ?? groups.set(key, []).get(key)!).push(s);
+      });
+      content.innerHTML = `
+        <div class="surface-card p-5 mb-5 max-w-xl">
+          <h2 class="text-base font-semibold mb-3">Add a skill</h2>
+          <div class="grid gap-3 sm:grid-cols-4">
+            <select class="field" id="sk-disc"><option value="tumble">Tumble</option><option value="dance">Dance</option></select>
+            <input class="field" id="sk-cat" placeholder="Category" />
+            <input class="field" id="sk-name" placeholder="Skill name" />
+            <input class="field" id="sk-level" type="number" min="1" max="10" value="1" title="Level" />
+          </div>
+          <button class="btn btn-primary btn-sm mt-3" id="sk-add">Add skill</button>
+        </div>
+        ${[...groups.entries()]
+          .map(
+            ([label, group]) => `
+          <div class="surface-card p-4 mb-3">
+            <h3 class="text-sm font-display font-semibold uppercase tracking-widest text-mist-400 mb-1">${esc(label)}</h3>
+            ${group
+              .map(
+                (s) => `
+              <div class="py-1.5 border-t border-ink-700 flex items-center justify-between gap-2">
+                <p class="text-sm">${esc(s.name)} <span class="text-mist-500 text-xs">L${s.level}</span></p>
+                <button class="btn btn-danger btn-sm" data-sk-del="${s.id}">Delete</button>
+              </div>`
+              )
+              .join('')}
+          </div>`
+          )
+          .join('')}`;
+
+      document.getElementById('sk-add')?.addEventListener('click', async () => {
+        const name = (document.getElementById('sk-name') as HTMLInputElement).value.trim();
+        const cat = (document.getElementById('sk-cat') as HTMLInputElement).value.trim();
+        if (!name || !cat) return toast('Category and name are required.', 'err');
+        const { error } = await supabase.from('skills').insert({
+          discipline: (document.getElementById('sk-disc') as HTMLSelectElement).value,
+          category: cat,
+          name,
+          level: Number((document.getElementById('sk-level') as HTMLInputElement).value),
+          sort: 999,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Skill added.');
+        render();
+      });
+      content.querySelectorAll<HTMLButtonElement>('[data-sk-del]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Delete this skill? Athlete progress on it is removed too.')) return;
+          const { error } = await supabase.from('skills').delete().eq('id', b.dataset.skDel);
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+    }
+
+    // ============================ EXPORT ============================
+    async function renderExport() {
+      const today = new Date();
+      const monthAgo = new Date();
+      monthAgo.setDate(monthAgo.getDate() - 28);
+      content.innerHTML = `
+        <div class="surface-card p-5 max-w-xl">
+          <h2 class="text-base font-semibold mb-1">Excel export</h2>
+          <p class="text-xs text-mist-500 mb-4">
+            Downloads an .xlsx with two sheets: every booking in the range (attendance, late
+            cancellations marked payable), and a per-coach pay summary (payable lessons × their rate).
+          </p>
+          <div class="flex flex-wrap items-end gap-3">
+            <div><label class="form-label" for="x-from">From</label><input class="field" type="date" id="x-from" value="${monthAgo.toISOString().slice(0, 10)}" /></div>
+            <div><label class="form-label" for="x-to">To</label><input class="field" type="date" id="x-to" value="${today.toISOString().slice(0, 10)}" /></div>
+            <button class="btn btn-primary" id="x-go">Download .xlsx</button>
+          </div>
+        </div>`;
+
+      document.getElementById('x-go')?.addEventListener('click', async () => {
+        const from = (document.getElementById('x-from') as HTMLInputElement).value;
+        const to = (document.getElementById('x-to') as HTMLInputElement).value;
+        const btn = document.getElementById('x-go') as HTMLButtonElement;
+        btn.disabled = true;
+        try {
+          const [{ data: rows, error }, { data: coachProfiles }] = await Promise.all([
+            supabase
+              .from('bookings')
+              .select('*, slots!inner(slot_date, start_time, end_time, locations(name)), athletes(name, parent_id), profiles!bookings_coach_id_fkey(full_name)')
+              .gte('slots.slot_date', from)
+              .lte('slots.slot_date', to),
+            supabase.from('coach_profiles').select('coach_id, rate_per_lesson'),
+          ]);
+          if (error) throw error;
+
+          const parentIds = [...new Set((rows ?? []).map((r) => r.athletes?.parent_id).filter(Boolean))];
+          const { data: parents } = parentIds.length
+            ? await supabase.from('profiles').select('id, full_name, email').in('id', parentIds)
+            : { data: [] };
+          const parentMap = new Map((parents ?? []).map((p) => [p.id, p]));
+          const rateMap = new Map((coachProfiles ?? []).map((c) => [c.coach_id, c.rate_per_lesson]));
+
+          const sorted = (rows ?? []).sort((a, b) =>
+            (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
+          );
+          const att: (string | number)[][] = [
+            ['Date', 'Time', 'Location', 'Athlete', 'Parent', 'Parent email', 'Coach', 'Booking', 'Status', 'Attendance', 'Payable', 'Coach rate (£)'],
+          ];
+          const perCoach = new Map<string, { lessons: number; present: number; absent: number; late: number; rate: number | null }>();
+          for (const r of sorted) {
+            const parent = parentMap.get(r.athletes?.parent_id);
+            const coach = r.profiles?.full_name ?? '';
+            const rate = rateMap.get(r.coach_id) ?? null;
+            const payable = r.status === 'booked' || r.status === 'late_cancelled';
+            att.push([
+              r.slots.slot_date,
+              r.slots.start_time.slice(0, 5) + '–' + r.slots.end_time.slice(0, 5),
+              r.slots.locations?.name ?? '',
+              r.athletes?.name ?? '',
+              parent?.full_name ?? (r.athletes ? '(own account)' : ''),
+              parent?.email ?? '',
+              coach,
+              r.series_booking_id ? 'Weekly' : 'One-off',
+              r.status === 'late_cancelled' ? 'Late cancelled' : r.status,
+              r.attendance ?? '',
+              payable ? 'Yes' : 'No',
+              rate ?? '',
+            ]);
+            const c = perCoach.get(coach) ?? { lessons: 0, present: 0, absent: 0, late: 0, rate };
+            if (payable) c.lessons++;
+            if (r.attendance === 'present') c.present++;
+            if (r.attendance === 'absent') c.absent++;
+            if (r.status === 'late_cancelled') c.late++;
+            c.rate = rate;
+            perCoach.set(coach, c);
+          }
+          const pay: (string | number)[][] = [
+            ['Coach', 'Payable lessons', 'Present', 'Absent', 'Late cancellations', 'Rate (£)', 'Total (£)'],
+          ];
+          for (const [coach, c] of perCoach) {
+            pay.push([coach, c.lessons, c.present, c.absent, c.late, c.rate ?? '', c.rate != null ? c.lessons * c.rate : '']);
+          }
+
+          const XLSX = await import('xlsx');
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(att), 'Attendance');
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pay), 'Coach pay');
+          XLSX.writeFile(wb, `ignyte-attendance-${from}-to-${to}.xlsx`);
+          toast('Export downloaded.');
+        } catch (e) {
+          toast(errMsg(e), 'err');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
+
+    // ============================ SETTINGS ============================
     async function renderSettings() {
       const { data: s } = await supabase.from('club_settings').select('*').single();
       content.innerHTML = `
