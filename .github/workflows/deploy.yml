@@ -1,0 +1,90 @@
+name: Deploy to Cloudflare
+
+# Builds the site on GitHub's runners and deploys it to Cloudflare Workers
+# static assets with wrangler — bypassing Cloudflare's own build system.
+#
+# Requires repo secrets:
+#   CLOUDFLARE_API_TOKEN   ("Edit Cloudflare Workers" template token)
+#   CLOUDFLARE_ACCOUNT_ID  (dashboard -> Workers & Pages -> right sidebar)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, claude/ignyte-club-manager-webapp-ydl038]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloudflare
+  cancel-in-progress: false
+
+env:
+  PUBLIC_SUPABASE_URL: https://iqpkeowpcqkmuffddzxj.supabase.co
+  PUBLIC_SUPABASE_ANON_KEY: sb_publishable_6RghDe8GTAIdKI530Oef8Q_alvNvTgg
+
+jobs:
+  deploy:
+    name: Build & deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Missing repo secret CLOUDFLARE_API_TOKEN — add it in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy with wrangler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler@4 deploy 2>&1 | tee /tmp/deploy.log
+
+      - name: Smoke test
+        run: |
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          if [ -z "$URL" ]; then
+            echo "Could not find deployed URL in wrangler output — check the log above."
+            exit 0
+          fi
+          echo "Deployed to $URL"
+          fail=0
+          sleep 5
+          for path in / /login /signup /dashboard /book /site.webmanifest /sw.js; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$URL$path" || true)
+            echo "$path → HTTP $code"
+            [ "$code" = "200" ] || fail=1
+          done
+          {
+            echo "### ✅ Ignyte Club Manager is live"
+            echo ""
+            echo "🔗 **$URL**"
+            echo ""
+            if [ "$fail" = "0" ]; then
+              echo "All pages, the PWA manifest and the service worker respond 200 ✓"
+            else
+              echo "⚠️ Some paths did not return 200 yet (edge propagation can take a minute) — see log."
+            fi
+            echo ""
+            echo "Next: set this URL as the Site URL in Supabase → Authentication → URL Configuration."
+          } >> "$GITHUB_STEP_SUMMARY"
