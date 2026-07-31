@@ -931,6 +931,46 @@ insert into public.skills (discipline, category, name, level, sort) values
   ('dance', 'Flexibility', 'Bow and arrow', 3, 36);
 
 -- ---------------------------------------------------------------------------
+-- Function execution lock-down. Functions in public are EXECUTE-able by
+-- PUBLIC by default, which would expose every security definer function
+-- (including internal ones that trust their callers) to the anon role.
+-- Revoke everything, then grant back only the user-facing RPCs.
+-- ---------------------------------------------------------------------------
+revoke execute on all functions in schema public from public, anon, authenticated;
+
+grant execute on function
+  public.book_slot (uuid, uuid, uuid, boolean),
+  public.cancel_booking (uuid),
+  public.cancel_booking_series (uuid),
+  public.join_waitlist (uuid, uuid, uuid),
+  public.leave_waitlist (uuid),
+  public.accept_waitlist_offer (uuid, uuid),
+  public.coach_join_slot (uuid, boolean),
+  public.coach_leave_slot (uuid, boolean),
+  public.take_register (uuid, public.attendance_status),
+  public.update_athlete_skill (uuid, integer, public.skill_status, text),
+  public.add_progress_note (uuid, text, uuid),
+  public.admin_create_slots (date, time, time, integer, integer, text),
+  public.admin_extend_series (uuid, integer),
+  public.admin_delete_slot (uuid),
+  public.get_slot_board (date, date),
+  -- helper predicates referenced by RLS policies run with the caller's
+  -- privileges, so authenticated needs EXECUTE on them
+  public.is_admin (),
+  public.is_coach (),
+  public.my_role (),
+  public.owns_athlete (uuid),
+  public.coach_teaches_athlete (uuid)
+to authenticated, service_role;
+
+-- Internal-only machinery (_create_booking, notify, promote_waitlist,
+-- slot_starts_at, trigger functions) stays owner-only: definer functions and
+-- triggers run as the owner, so nothing user-facing breaks.
+
+-- Future functions shouldn't auto-grant to everyone either.
+alter default privileges in schema public revoke execute on functions from public;
+
+-- ---------------------------------------------------------------------------
 -- FIRST ADMIN — after you sign up in the app, run this with your email:
 --   update public.profiles set role = 'admin' where email = 'you@example.com';
 -- ---------------------------------------------------------------------------
