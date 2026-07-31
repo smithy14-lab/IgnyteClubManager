@@ -1,0 +1,45 @@
+---
+/**
+ * The Ignyte brand mark — an athletic, right-leaning flame with a 45° spark
+ * cut from its hot centre (negative space) and a single ember flicking off the
+ * tip. Pure vector, so it's pixel-perfect at any size and needs no fonts.
+ *
+ * Uses the shared vertical flame gradient defined once in BaseLayout
+ * (#ignyte-flame-gradient: amber tip → orange → magenta base). Pass
+ * gradient={false} for a flat currentColor version, and ember={false} for the
+ * cleaner small/favicon silhouette. The spark is a true hole (fill-rule
+ * evenodd) so the mark works on any background.
+ */
+interface Props {
+  class?: string;
+  size?: number;
+  gradient?: boolean;
+  ember?: boolean;
+}
+const { class: className = '', size = 28, gradient = true, ember = true } = Astro.props;
+
+// Geometry in a 0..100 box (kept in sync with scripts/generate-images.mjs).
+// A full, bold flame with a large 45° spark cut from its hot centre.
+const FLAME =
+  'M56 5 C60 21 57 33 57 43 C69 52 80 63 74 80 C69 92 59 97 49 97 C36 97 25 88 24 73 C23 61 33 54 36 44 C40 30 52 23 56 5 Z';
+const SPARK =
+  'M50 56 L65.91 47.09 L57 63 L65.91 78.91 L50 70 L34.09 78.91 L43 63 L34.09 47.09 Z';
+const EMBER = 'M62 15 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0 Z';
+const d = `${FLAME} ${ember ? EMBER + ' ' : ''}${SPARK}`;
+---
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width={size}
+  height={size}
+  viewBox="0 0 100 100"
+  class={className}
+  aria-hidden="true"
+  role="presentation"
+>
+  <path
+    d={d}
+    fill-rule="evenodd"
+    fill={gradient ? 'url(#ignyte-flame-gradient)' : 'currentColor'}
+  />
+</svg>

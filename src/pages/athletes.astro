@@ -1,0 +1,90 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="My athletes">
+  <p class="eyebrow">Family</p>
+  <h1 class="text-2xl mt-1 mb-5">My athletes</h1>
+
+  <div id="list" class="grid gap-4 sm:grid-cols-2 mb-6"></div>
+
+  <div class="surface-card p-5 max-w-md">
+    <h2 class="text-base font-semibold mb-4">Add an athlete</h2>
+    <form id="add-form" class="flex flex-col gap-4">
+      <div>
+        <label class="form-label" for="name">Name</label>
+        <input class="field" id="name" name="name" required />
+      </div>
+      <div>
+        <label class="form-label" for="dob">Date of birth</label>
+        <input class="field" id="dob" name="dob" type="date" required />
+      </div>
+      <div>
+        <label class="form-label" for="notes">Notes (optional — medical, goals…)</label>
+        <textarea class="field" id="notes" name="notes" rows="2"></textarea>
+      </div>
+      <button class="btn btn-primary" type="submit">Add athlete</button>
+    </form>
+  </div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requireAuth, myAthletes, ageFromDob, esc, toast, errMsg } from '../lib/app';
+
+    const list = document.getElementById('list')!;
+
+    async function render() {
+      const athletes = await myAthletes();
+      list.innerHTML = athletes.length
+        ? athletes
+            .map(
+              (a) => `
+        <div class="surface-card p-5">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="font-semibold">${esc(a.name)}</h3>
+            <span class="pill">${ageFromDob(a.dob)} yrs</span>
+          </div>
+          ${a.notes ? `<p class="text-xs text-mist-400 mt-1.5">${esc(a.notes)}</p>` : ''}
+          <div class="mt-3 flex gap-2">
+            <a class="btn btn-ghost btn-sm" href="/progress?athlete=${a.id}">Progression</a>
+            <button class="btn btn-danger btn-sm" data-remove="${a.id}">Remove</button>
+          </div>
+        </div>`
+            )
+            .join('')
+        : '<p class="text-sm text-mist-500 sm:col-span-2">No athletes yet — add one below to start booking lessons.</p>';
+
+      list.querySelectorAll<HTMLButtonElement>('[data-remove]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Remove this athlete? Their bookings and progression history will be removed too.')) return;
+          const { error } = await supabase.from('athletes').delete().eq('id', b.dataset.remove);
+          if (error) return toast(errMsg(error), 'err');
+          toast('Athlete removed.');
+          render();
+        })
+      );
+    }
+
+    (async () => {
+      const profile = await requireAuth(['parent', 'admin']);
+      const form = document.getElementById('add-form') as HTMLFormElement;
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(form);
+        const { error } = await supabase.from('athletes').insert({
+          parent_id: profile.id,
+          name: String(fd.get('name')),
+          dob: String(fd.get('dob')),
+          notes: String(fd.get('notes') ?? '') || null,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Athlete added!');
+        form.reset();
+        render();
+      });
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

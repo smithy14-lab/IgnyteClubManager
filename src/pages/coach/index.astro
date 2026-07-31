@@ -1,0 +1,327 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Coaching hub">
+  <p class="eyebrow">Coaching</p>
+  <h1 class="text-2xl mt-1 mb-5">Coaching hub</h1>
+
+  <div class="flex gap-2 mb-5">
+    <button id="tab-lessons" class="btn btn-primary btn-sm">My lessons</button>
+    <button id="tab-slots" class="btn btn-ghost btn-sm">Join slots</button>
+  </div>
+
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <!-- progression editor -->
+  <div id="prog-backdrop" class="hidden fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
+    <div class="surface-card w-full sm:max-w-lg p-6 max-h-[90dvh] overflow-y-auto rounded-b-none sm:rounded-b-[var(--radius-xl)]">
+      <div class="flex items-start justify-between gap-3">
+        <h2 id="prog-title" class="text-lg">Update progression</h2>
+        <button id="prog-close" class="btn btn-ghost btn-sm">Close</button>
+      </div>
+      <div class="mt-4">
+        <label class="form-label" for="prog-note">Lesson note (visible to the family)</label>
+        <div class="flex gap-2">
+          <textarea class="field" id="prog-note" rows="2" placeholder="What did you work on today?"></textarea>
+        </div>
+        <button id="prog-note-save" class="btn btn-primary btn-sm mt-2">Add note</button>
+      </div>
+      <div id="prog-skills" class="mt-5"></div>
+    </div>
+  </div>
+
+  <script>
+    import { supabase } from '../../lib/supabase';
+    import {
+      requireAuth,
+      fmtDate,
+      fmtTime,
+      esc,
+      toast,
+      errMsg,
+      skillStatusLabels,
+      skillStatusOrder,
+    } from '../../lib/app';
+
+    const content = document.getElementById('content')!;
+    let me: Awaited<ReturnType<typeof requireAuth>>;
+    let tab: 'lessons' | 'slots' = 'lessons';
+
+    const tabLessons = document.getElementById('tab-lessons')!;
+    const tabSlots = document.getElementById('tab-slots')!;
+    function setTab(t: 'lessons' | 'slots') {
+      tab = t;
+      tabLessons.className = t === 'lessons' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+      tabSlots.className = t === 'slots' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+      render();
+    }
+    tabLessons.addEventListener('click', () => setTab('lessons'));
+    tabSlots.addEventListener('click', () => setTab('slots'));
+
+    async function render() {
+      content.innerHTML = '<p class="text-mist-500 text-sm">Loading…</p>';
+      if (tab === 'lessons') await renderLessons();
+      else await renderSlots();
+    }
+
+    // ---------------- My lessons + register ----------------
+    async function renderLessons() {
+      const from = new Date();
+      from.setDate(from.getDate() - 7); // last week still needs its register
+      const { data } = await supabase
+        .from('bookings')
+        .select('*, slots(slot_date, start_time, end_time), athletes(id, name)')
+        .eq('coach_id', me.id)
+        .eq('status', 'booked')
+        .gte('slots.slot_date', from.toISOString().slice(0, 10));
+
+      const lessons = (data ?? [])
+        .filter((b) => b.slots)
+        .sort((a, b) =>
+          (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
+        );
+      const today = new Date().toISOString().slice(0, 10);
+
+      if (!lessons.length) {
+        content.innerHTML =
+          '<div class="surface-card p-8 text-center text-sm text-mist-500">No lessons booked with you yet. Join some slots so families can book you.</div>';
+        return;
+      }
+
+      const byDate = new Map<string, typeof lessons>();
+      lessons.forEach((b) => (byDate.get(b.slots.slot_date) ?? byDate.set(b.slots.slot_date, []).get(b.slots.slot_date)!).push(b));
+
+      content.innerHTML = [...byDate.entries()]
+        .map(
+          ([date, day]) => `
+        <h2 class="text-sm font-display font-semibold uppercase tracking-widest ${date === today ? 'text-ignite-400' : 'text-mist-400'} mt-5 mb-2">
+          ${fmtDate(date)}${date === today ? ' · today' : ''}
+        </h2>
+        <div class="grid gap-3">
+          ${day
+            .map((b) => {
+              const past = date <= today;
+              return `
+            <div class="surface-card p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="font-display font-semibold">${fmtTime(b.slots.start_time)}–${fmtTime(b.slots.end_time)} — ${esc(b.athletes?.name)}</p>
+                ${
+                  b.attendance
+                    ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'} mt-1">${b.attendance === 'present' ? 'Present' : 'Absent'}</span>`
+                    : past
+                      ? '<span class="pill pill-warn mt-1">Register due</span>'
+                      : ''
+                }
+              </div>
+              <div class="flex flex-wrap gap-2">
+                ${
+                  past
+                    ? `<button class="btn btn-ghost btn-sm" data-present="${b.id}">Present</button>
+                       <button class="btn btn-ghost btn-sm" data-absent="${b.id}">Absent</button>`
+                    : `<button class="btn btn-danger btn-sm" data-coach-cancel="${b.id}">Cancel</button>`
+                }
+                <button class="btn btn-primary btn-sm" data-progress="${b.athletes?.id}" data-booking="${b.id}" data-name="${esc(b.athletes?.name)}">Progress</button>
+              </div>
+            </div>`;
+            })
+            .join('')}
+        </div>`
+        )
+        .join('');
+
+      content.querySelectorAll<HTMLButtonElement>('[data-present]').forEach((b) =>
+        b.addEventListener('click', () => mark(b.dataset.present!, 'present'))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-absent]').forEach((b) =>
+        b.addEventListener('click', () => mark(b.dataset.absent!, 'absent'))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-coach-cancel]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Cancel this lesson? The family will be notified and the space offered to the waiting list.')) return;
+          const { error } = await supabase.rpc('cancel_booking', { p_booking_id: b.dataset.coachCancel });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Lesson cancelled — family notified.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-progress]').forEach((b) =>
+        b.addEventListener('click', () =>
+          openProgress(b.dataset.progress!, b.dataset.name ?? '', b.dataset.booking!)
+        )
+      );
+    }
+
+    async function mark(bookingId: string, attendance: 'present' | 'absent') {
+      const { error } = await supabase.rpc('take_register', {
+        p_booking_id: bookingId,
+        p_attendance: attendance,
+      });
+      if (error) return toast(errMsg(error), 'err');
+      toast('Register updated.');
+      render();
+    }
+
+    // ---------------- Join slots ----------------
+    async function renderSlots() {
+      const from = new Date().toISOString().slice(0, 10);
+      const toD = new Date();
+      toD.setDate(toD.getDate() + 28);
+      const [{ data: board }, { data: mine }] = await Promise.all([
+        supabase.rpc('get_slot_board', { p_from: from, p_to: toD.toISOString().slice(0, 10) }),
+        supabase.from('slot_coaches').select('slot_id').eq('coach_id', me.id),
+      ]);
+      const mySlotIds = new Set((mine ?? []).map((r) => r.slot_id));
+      type Slot = {
+        id: string; slot_date: string; start_time: string; end_time: string;
+        capacity: number; series_id: string | null; booked: number;
+        coaches: { id: string; name: string }[];
+      };
+      const slots = ((board ?? []) as Slot[]);
+
+      if (!slots.length) {
+        content.innerHTML =
+          '<div class="surface-card p-8 text-center text-sm text-mist-500">No slots in the next 4 weeks — ask a club admin to add some.</div>';
+        return;
+      }
+
+      const byDate = new Map<string, Slot[]>();
+      slots.forEach((s) => (byDate.get(s.slot_date) ?? byDate.set(s.slot_date, []).get(s.slot_date)!).push(s));
+
+      content.innerHTML =
+        '<p class="text-sm text-mist-400 mb-3">Add yourself to the slots you can coach — families can then book you.</p>' +
+        [...byDate.entries()]
+          .map(
+            ([date, day]) => `
+        <h2 class="text-sm font-display font-semibold uppercase tracking-widest text-mist-400 mt-5 mb-2">${fmtDate(date)}</h2>
+        <div class="grid gap-3 sm:grid-cols-2">
+          ${day
+            .map((s) => {
+              const joined = mySlotIds.has(s.id);
+              return `
+            <div class="surface-card p-4">
+              <div class="flex items-center justify-between gap-2">
+                <p class="font-display font-semibold">${fmtTime(s.start_time)}–${fmtTime(s.end_time)}</p>
+                ${joined ? '<span class="pill pill-success">You’re in</span>' : ''}
+              </div>
+              <p class="text-xs text-mist-400 mt-1.5">
+                ${s.capacity} space${s.capacity === 1 ? '' : 's'} · ${s.booked} booked
+                ${s.series_id ? ' · <span class="text-ignite-400">weekly</span>' : ''}
+              </p>
+              <p class="text-xs text-mist-500 mt-1">${s.coaches.length ? 'Coaches: ' + s.coaches.map((c) => esc(c.name)).join(', ') : 'No coaches yet'}</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                ${
+                  joined
+                    ? `<button class="btn btn-danger btn-sm" data-leave="${s.id}">Leave</button>` +
+                      (s.series_id ? `<button class="btn btn-danger btn-sm" data-leave-series="${s.id}">Leave series</button>` : '')
+                    : `<button class="btn btn-primary btn-sm" data-join="${s.id}">Join</button>` +
+                      (s.series_id ? `<button class="btn btn-ghost btn-sm" data-join-series="${s.id}">Join every week</button>` : '')
+                }
+              </div>
+            </div>`;
+            })
+            .join('')}
+        </div>`
+          )
+          .join('');
+
+      const act = async (fn: string, slotId: string, series: boolean) => {
+        const { error } = await supabase.rpc(fn, { p_slot_id: slotId, p_whole_series: series });
+        if (error) return toast(errMsg(error), 'err');
+        toast(fn === 'coach_join_slot' ? 'Added — families can now book you.' : 'Removed from slot.');
+        render();
+      };
+      content.querySelectorAll<HTMLButtonElement>('[data-join]').forEach((b) =>
+        b.addEventListener('click', () => act('coach_join_slot', b.dataset.join!, false))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-join-series]').forEach((b) =>
+        b.addEventListener('click', () => act('coach_join_slot', b.dataset.joinSeries!, true))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-leave]').forEach((b) =>
+        b.addEventListener('click', () => act('coach_leave_slot', b.dataset.leave!, false))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-leave-series]').forEach((b) =>
+        b.addEventListener('click', () => act('coach_leave_slot', b.dataset.leaveSeries!, true))
+      );
+    }
+
+    // ---------------- Progression editor ----------------
+    const progBackdrop = document.getElementById('prog-backdrop')!;
+    const progSkills = document.getElementById('prog-skills')!;
+    let progAthleteId = '';
+    let progBookingId = '';
+
+    document.getElementById('prog-close')?.addEventListener('click', () => progBackdrop.classList.add('hidden'));
+    progBackdrop.addEventListener('click', (e) => {
+      if (e.target === progBackdrop) progBackdrop.classList.add('hidden');
+    });
+
+    async function openProgress(athleteId: string, name: string, bookingId: string) {
+      progAthleteId = athleteId;
+      progBookingId = bookingId;
+      document.getElementById('prog-title')!.textContent = `Progression — ${name}`;
+      (document.getElementById('prog-note') as HTMLTextAreaElement).value = '';
+      progSkills.innerHTML = '<p class="text-sm text-mist-500">Loading skills…</p>';
+      progBackdrop.classList.remove('hidden');
+
+      const [{ data: skills }, { data: statuses }] = await Promise.all([
+        supabase.from('skills').select('*').order('sort'),
+        supabase.from('athlete_skills').select('*').eq('athlete_id', athleteId),
+      ]);
+      const statusMap = new Map((statuses ?? []).map((s) => [s.skill_id, s.status]));
+
+      const section = (disc: string, label: string) => {
+        const dSkills = (skills ?? []).filter((s) => s.discipline === disc);
+        if (!dSkills.length) return '';
+        return `<h3 class="text-sm font-display font-semibold uppercase tracking-widest text-mist-400 mt-4 mb-1">${label}</h3>
+          ${dSkills
+            .map((s) => {
+              const cur = statusMap.get(s.id) ?? 'not_started';
+              return `
+            <div class="py-2 border-t border-ink-700 flex flex-wrap items-center justify-between gap-2">
+              <p class="text-sm">${esc(s.name)} <span class="text-mist-500 text-xs">· ${esc(s.category)} L${s.level}</span></p>
+              <select class="field !w-auto !py-1 !text-xs" data-skill="${s.id}">
+                ${skillStatusOrder
+                  .map((st) => `<option value="${st}" ${st === cur ? 'selected' : ''}>${skillStatusLabels[st]}</option>`)
+                  .join('')}
+              </select>
+            </div>`;
+            })
+            .join('')}`;
+      };
+
+      progSkills.innerHTML = section('tumble', 'Tumble') + section('dance', 'All-star dance');
+      progSkills.querySelectorAll<HTMLSelectElement>('[data-skill]').forEach((sel) =>
+        sel.addEventListener('change', async () => {
+          const { error } = await supabase.rpc('update_athlete_skill', {
+            p_athlete_id: progAthleteId,
+            p_skill_id: Number(sel.dataset.skill),
+            p_status: sel.value,
+          });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Skill updated.');
+        })
+      );
+    }
+
+    document.getElementById('prog-note-save')?.addEventListener('click', async () => {
+      const note = (document.getElementById('prog-note') as HTMLTextAreaElement).value.trim();
+      if (!note) return;
+      const { error } = await supabase.rpc('add_progress_note', {
+        p_athlete_id: progAthleteId,
+        p_note: note,
+        p_booking_id: progBookingId,
+      });
+      if (error) return toast(errMsg(error), 'err');
+      toast('Note added.');
+      (document.getElementById('prog-note') as HTMLTextAreaElement).value = '';
+    });
+
+    (async () => {
+      me = await requireAuth(['coach', 'admin']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

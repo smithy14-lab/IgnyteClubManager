@@ -1,0 +1,144 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Progression">
+  <p class="eyebrow">Progression</p>
+  <div class="flex flex-wrap items-center justify-between gap-3 mt-1 mb-5">
+    <h1 class="text-2xl">Skill progression</h1>
+    <select id="athlete-picker" class="field !w-auto hidden"></select>
+  </div>
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import {
+      requireAuth,
+      myAthletes,
+      esc,
+      toast,
+      errMsg,
+      fmtDateTime,
+      skillStatusLabels,
+    } from '../lib/app';
+
+    const content = document.getElementById('content')!;
+    const picker = document.getElementById('athlete-picker') as HTMLSelectElement;
+
+    const statusPill: Record<string, string> = {
+      not_started: 'pill',
+      working_on: 'pill pill-warn',
+      achieved: 'pill pill-accent',
+      mastered: 'pill pill-success',
+    };
+
+    async function render(athleteId: string) {
+      const [{ data: skills }, { data: statuses }, { data: notes }, { data: athlete }] =
+        await Promise.all([
+          supabase.from('skills').select('*').order('sort'),
+          supabase.from('athlete_skills').select('*').eq('athlete_id', athleteId),
+          supabase
+            .from('progress_notes')
+            .select('*, profiles!progress_notes_coach_id_fkey(full_name)')
+            .eq('athlete_id', athleteId)
+            .order('created_at', { ascending: false })
+            .limit(30),
+          supabase.from('athletes').select('name').eq('id', athleteId).single(),
+        ]);
+
+      if (!athlete) {
+        content.innerHTML = '<p class="text-sm text-mist-500">Athlete not found.</p>';
+        return;
+      }
+
+      const statusMap = new Map((statuses ?? []).map((s) => [s.skill_id, s]));
+
+      const renderDiscipline = (disc: 'tumble' | 'dance', label: string) => {
+        const dSkills = (skills ?? []).filter((s) => s.discipline === disc);
+        if (!dSkills.length) return '';
+        const done = dSkills.filter((s) => {
+          const st = statusMap.get(s.id)?.status;
+          return st === 'achieved' || st === 'mastered';
+        }).length;
+        const pct = Math.round((done / dSkills.length) * 100);
+
+        const cats = new Map<string, typeof dSkills>();
+        dSkills.forEach((s) => (cats.get(s.category) ?? cats.set(s.category, []).get(s.category)!).push(s));
+
+        return `<div class="surface-card p-5 mb-5">
+          <div class="flex items-center justify-between gap-3 mb-2">
+            <h2 class="text-lg">${label}</h2>
+            <span class="text-sm text-mist-400">${done}/${dSkills.length} skills</span>
+          </div>
+          <div class="progress-track mb-4"><div class="progress-fill" style="width:${pct}%"></div></div>
+          ${[...cats.entries()]
+            .map(
+              ([cat, catSkills]) => `
+            <h3 class="text-xs font-display font-semibold uppercase tracking-widest text-mist-400 mt-4 mb-1">${esc(cat)}</h3>
+            ${catSkills
+              .map((s) => {
+                const st = statusMap.get(s.id);
+                const status = st?.status ?? 'not_started';
+                return `
+              <div class="py-2 border-t border-ink-700 flex items-center justify-between gap-2">
+                <div>
+                  <p class="text-sm">${esc(s.name)} <span class="text-mist-500 text-xs">· L${s.level}</span></p>
+                  ${st?.notes ? `<p class="text-xs text-mist-500 mt-0.5">${esc(st.notes)}</p>` : ''}
+                </div>
+                <span class="${statusPill[status]}">${skillStatusLabels[status]}</span>
+              </div>`;
+              })
+              .join('')}`
+            )
+            .join('')}
+        </div>`;
+      };
+
+      content.innerHTML =
+        renderDiscipline('tumble', 'Tumble') +
+        renderDiscipline('dance', 'All-star dance') +
+        `<div class="surface-card p-5">
+          <h2 class="text-lg mb-3">Coach notes</h2>
+          ${
+            (notes ?? []).length
+              ? (notes ?? [])
+                  .map(
+                    (n) => `
+              <div class="py-3 border-t border-ink-700 first:border-0">
+                <p class="text-sm">${esc(n.note)}</p>
+                <p class="text-xs text-mist-500 mt-1">${esc(n.profiles?.full_name)} · ${fmtDateTime(n.created_at)}</p>
+              </div>`
+                  )
+                  .join('')
+              : '<p class="text-sm text-mist-500">No notes yet — they appear after lessons.</p>'
+          }
+        </div>`;
+    }
+
+    (async () => {
+      await requireAuth();
+      const athletes = await myAthletes();
+      if (!athletes.length) {
+        content.innerHTML =
+          '<div class="surface-card p-8 text-center text-sm text-mist-500">No athletes on your account yet.</div>';
+        return;
+      }
+      const requested = new URLSearchParams(location.search).get('athlete');
+      let current = athletes.find((a) => a.id === requested)?.id ?? athletes[0].id;
+
+      if (athletes.length > 1) {
+        picker.classList.remove('hidden');
+        picker.innerHTML = athletes
+          .map((a) => `<option value="${a.id}" ${a.id === current ? 'selected' : ''}>${esc(a.name)}</option>`)
+          .join('');
+        picker.addEventListener('change', () => {
+          current = picker.value;
+          render(current);
+        });
+      }
+      await render(current);
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

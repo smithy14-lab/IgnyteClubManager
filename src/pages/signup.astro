@@ -1,0 +1,146 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import IgnyteMark from '../components/IgnyteMark.astro';
+---
+
+<AppLayout title="Create account" chrome={false}>
+  <section class="min-h-[85dvh] flex items-center justify-center py-8">
+    <div class="w-full max-w-sm surface-card p-7 animate-rise">
+      <div class="flex items-center gap-2.5 mb-6">
+        <IgnyteMark size={30} />
+        <h1 class="text-xl">Create account</h1>
+      </div>
+
+      <form id="signup-form" class="flex flex-col gap-4">
+        <div>
+          <label class="form-label">I am a…</label>
+          <div class="grid grid-cols-3 gap-2" id="role-picker">
+            <button type="button" data-role="parent" class="role-btn is-active">Parent</button>
+            <button type="button" data-role="athlete" class="role-btn">Athlete 18+</button>
+            <button type="button" data-role="coach" class="role-btn">Coach</button>
+          </div>
+          <p id="role-hint" class="mt-1.5 text-xs text-mist-500">
+            Parents book for their athletes. Athletes under 18 are added to a parent account and
+            don't get their own login.
+          </p>
+        </div>
+        <div>
+          <label class="form-label" for="full_name">Full name</label>
+          <input class="field" id="full_name" name="full_name" autocomplete="name" required />
+        </div>
+        <div id="dob-wrap" class="hidden">
+          <label class="form-label" for="dob">Date of birth</label>
+          <input class="field" id="dob" name="dob" type="date" />
+          <p class="mt-1 text-xs text-mist-500">You must be 18 or over for your own account.</p>
+        </div>
+        <div>
+          <label class="form-label" for="email">Email</label>
+          <input class="field" id="email" name="email" type="email" autocomplete="email" required />
+        </div>
+        <div>
+          <label class="form-label" for="phone">Phone (optional)</label>
+          <input class="field" id="phone" name="phone" type="tel" autocomplete="tel" />
+        </div>
+        <div>
+          <label class="form-label" for="password">Password</label>
+          <input
+            class="field"
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="new-password"
+            minlength="8"
+            required
+          />
+        </div>
+        <button type="submit" class="btn btn-primary mt-1">Create account</button>
+      </form>
+      <p class="mt-5 text-sm text-mist-400">
+        <a href="/login" class="hover:text-ignite-400">Already have an account? Sign in</a>
+      </p>
+    </div>
+  </section>
+
+  <style>
+    .role-btn {
+      border: 1px solid var(--color-ink-600);
+      border-radius: var(--radius-md);
+      padding: 0.5rem 0.25rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--color-mist-300);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .role-btn.is-active {
+      border-color: var(--color-ignite-500);
+      color: var(--color-ignite-400);
+      background: color-mix(in srgb, var(--color-ignite-500) 10%, transparent);
+    }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { toast, errMsg } from '../lib/app';
+
+    let role = 'parent';
+    const hints: Record<string, string> = {
+      parent:
+        "Parents book for their athletes. Athletes under 18 are added to a parent account and don't get their own login.",
+      athlete: 'Athletes aged 18 or over manage their own bookings and progression.',
+      coach: 'Coaches join lesson slots, take the register and update athlete progression.',
+    };
+    document.querySelectorAll<HTMLButtonElement>('.role-btn').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        role = btn.dataset.role ?? 'parent';
+        document.querySelectorAll('.role-btn').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        document.getElementById('dob-wrap')?.classList.toggle('hidden', role !== 'athlete');
+        const dob = document.getElementById('dob') as HTMLInputElement;
+        dob.required = role === 'athlete';
+        const hint = document.getElementById('role-hint');
+        if (hint) hint.textContent = hints[role];
+      })
+    );
+
+    const form = document.getElementById('signup-form') as HTMLFormElement;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+
+      if (role === 'athlete') {
+        const dob = new Date(String(fd.get('dob')) + 'T00:00:00');
+        const cutoff = new Date();
+        cutoff.setFullYear(cutoff.getFullYear() - 18);
+        if (dob > cutoff) {
+          return toast(
+            'Under-18 athletes are added by a parent — please register a parent account instead.',
+            'err'
+          );
+        }
+      }
+
+      const { error, data } = await supabase.auth.signUp({
+        email: String(fd.get('email')),
+        password: String(fd.get('password')),
+        options: {
+          data: {
+            full_name: String(fd.get('full_name')),
+            phone: String(fd.get('phone') ?? ''),
+            role,
+            dob: role === 'athlete' ? String(fd.get('dob')) : null,
+          },
+        },
+      });
+      if (error) return toast(errMsg(error), 'err');
+
+      // With email confirmation on, there's no session yet.
+      if (!data.session) {
+        toast('Account created — check your email to confirm, then sign in.');
+        setTimeout(() => (location.href = '/login'), 2500);
+      } else {
+        location.href = '/dashboard';
+      }
+    });
+  </script>
+</AppLayout>

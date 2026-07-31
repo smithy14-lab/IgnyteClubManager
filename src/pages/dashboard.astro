@@ -1,0 +1,216 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Dashboard">
+  <div id="dash" class="animate-fade">
+    <p class="text-mist-500 text-sm">Loading…</p>
+  </div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import {
+      requireAuth,
+      myAthletes,
+      fmtDate,
+      fmtTime,
+      esc,
+      toast,
+      errMsg,
+    } from '../lib/app';
+
+    const dash = document.getElementById('dash')!;
+
+    async function render() {
+      const profile = await requireAuth();
+      const today = new Date().toISOString().slice(0, 10);
+      const firstName = profile.full_name.split(' ')[0];
+
+      let html = `
+        <p class="eyebrow">Dashboard</p>
+        <h1 class="text-2xl mt-1 mb-6">Hey, ${esc(firstName)} 👋</h1>`;
+
+      if (profile.role === 'parent' || profile.role === 'athlete') {
+        const athletes = await myAthletes();
+        const athleteIds = athletes.map((a) => a.id);
+
+        // Upcoming lessons
+        const { data: bookings } = athleteIds.length
+          ? await supabase
+              .from('bookings')
+              .select('*, slots(slot_date, start_time, end_time), profiles!bookings_coach_id_fkey(full_name), athletes(name)')
+              .in('athlete_id', athleteIds)
+              .eq('status', 'booked')
+              .gte('slots.slot_date', today)
+              .order('created_at')
+          : { data: [] };
+        const upcoming = (bookings ?? [])
+          .filter((b) => b.slots)
+          .sort((a, b) =>
+            (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
+          )
+          .slice(0, 5);
+
+        // Waiting list offers needing action
+        const { data: offers } = athleteIds.length
+          ? await supabase
+              .from('waitlist')
+              .select('*, slots(slot_date, start_time), athletes(name)')
+              .in('athlete_id', athleteIds)
+              .eq('status', 'offered')
+          : { data: [] };
+
+        if ((offers ?? []).length) {
+          html += `<div class="surface-card p-5 mb-5 border-ignite-500/40" style="box-shadow: var(--shadow-glow)">
+            <h2 class="text-base font-semibold text-ignite-400">🎉 A space has opened up!</h2>
+            ${(offers ?? [])
+              .map(
+                (o) => `
+              <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <p class="text-sm">${esc(o.athletes?.name)} — ${fmtDate(o.slots.slot_date)} at ${fmtTime(o.slots.start_time)}</p>
+                <a href="/bookings" class="btn btn-primary btn-sm">Respond</a>
+              </div>`
+              )
+              .join('')}
+          </div>`;
+        }
+
+        html += `<div class="grid gap-4 sm:grid-cols-2">
+          <div class="surface-card p-5">
+            <h2 class="text-base font-semibold mb-3">Next lessons</h2>
+            ${
+              upcoming.length
+                ? upcoming
+                    .map(
+                      (b) => `
+                <div class="py-2.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+                  <div>
+                    <p class="text-sm font-medium">${fmtDate(b.slots.slot_date)} · ${fmtTime(b.slots.start_time)}</p>
+                    <p class="text-xs text-mist-400 mt-0.5">${esc(b.athletes?.name)} with ${esc(b.profiles?.full_name)}</p>
+                  </div>
+                  ${b.series_booking_id ? '<span class="pill pill-accent">Weekly</span>' : ''}
+                </div>`
+                    )
+                    .join('')
+                : '<p class="text-sm text-mist-500">No lessons booked yet.</p>'
+            }
+            <a href="/book" class="btn btn-primary btn-sm mt-4">Book a lesson</a>
+          </div>
+
+          <div class="surface-card p-5">
+            <h2 class="text-base font-semibold mb-3">${profile.role === 'parent' ? 'Your athletes' : 'Your progression'}</h2>
+            ${
+              athletes.length
+                ? athletes
+                    .map(
+                      (a) => `
+                <div class="py-2.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+                  <p class="text-sm font-medium">${esc(a.name)}</p>
+                  <a class="btn btn-ghost btn-sm" href="/progress?athlete=${a.id}">Progress</a>
+                </div>`
+                    )
+                    .join('')
+                : `<p class="text-sm text-mist-500">${
+                    profile.role === 'parent'
+                      ? 'Add your athletes to start booking.'
+                      : 'No athlete record found.'
+                  }</p>`
+            }
+            ${profile.role === 'parent' ? '<a href="/athletes" class="btn btn-ghost btn-sm mt-4">Manage athletes</a>' : ''}
+          </div>
+        </div>`;
+      }
+
+      if (profile.role === 'coach') {
+        const { data: myLessons } = await supabase
+          .from('bookings')
+          .select('*, slots(slot_date, start_time, end_time), athletes(name)')
+          .eq('coach_id', profile.id)
+          .eq('status', 'booked')
+          .gte('slots.slot_date', today);
+        const lessons = (myLessons ?? [])
+          .filter((b) => b.slots)
+          .sort((a, b) =>
+            (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
+          );
+        const todays = lessons.filter((b) => b.slots.slot_date === today);
+
+        html += `<div class="grid gap-4 sm:grid-cols-2">
+          <div class="surface-card p-5">
+            <h2 class="text-base font-semibold mb-3">Today's lessons (${todays.length})</h2>
+            ${
+              todays.length
+                ? todays
+                    .map(
+                      (b) => `
+                  <div class="py-2.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+                    <p class="text-sm font-medium">${fmtTime(b.slots.start_time)} — ${esc(b.athletes?.name)}</p>
+                    ${
+                      b.attendance
+                        ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'}">${b.attendance}</span>`
+                        : '<span class="pill pill-warn">Register due</span>'
+                    }
+                  </div>`
+                    )
+                    .join('')
+                : '<p class="text-sm text-mist-500">Nothing today.</p>'
+            }
+            <a href="/coach" class="btn btn-primary btn-sm mt-4">Open coaching hub</a>
+          </div>
+          <div class="surface-card p-5">
+            <h2 class="text-base font-semibold mb-3">Upcoming</h2>
+            ${
+              lessons.slice(0, 6).length
+                ? lessons
+                    .slice(0, 6)
+                    .map(
+                      (b) => `
+                  <div class="py-2 border-t border-ink-700 first:border-0">
+                    <p class="text-sm">${fmtDate(b.slots.slot_date)} · ${fmtTime(b.slots.start_time)} — ${esc(b.athletes?.name)}</p>
+                  </div>`
+                    )
+                    .join('')
+                : '<p class="text-sm text-mist-500">No upcoming lessons.</p>'
+            }
+          </div>
+        </div>`;
+      }
+
+      if (profile.role === 'admin') {
+        const [{ count: slotCount }, { count: bookingCount }, { count: waitCount }, { count: userCount }] =
+          await Promise.all([
+            supabase.from('slots').select('*', { count: 'exact', head: true }).gte('slot_date', today),
+            supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'booked'),
+            supabase.from('waitlist').select('*', { count: 'exact', head: true }).in('status', ['waiting', 'offered']),
+            supabase.from('profiles').select('*', { count: 'exact', head: true }),
+          ]);
+        html += `<div class="grid gap-4 grid-cols-2 sm:grid-cols-4">
+          ${[
+            ['Upcoming slots', slotCount],
+            ['Active bookings', bookingCount],
+            ['On waiting lists', waitCount],
+            ['Accounts', userCount],
+          ]
+            .map(
+              ([label, n]) => `
+            <div class="surface-card p-5 text-center">
+              <p class="text-3xl font-display font-semibold ignite-text">${n ?? 0}</p>
+              <p class="text-xs text-mist-400 mt-1">${label}</p>
+            </div>`
+            )
+            .join('')}
+        </div>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/admin" class="btn btn-primary">Manage slots &amp; club</a>
+          <a href="/book" class="btn btn-ghost">View timetable</a>
+        </div>`;
+      }
+
+      dash.innerHTML = html;
+    }
+
+    render().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

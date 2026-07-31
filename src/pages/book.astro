@@ -1,0 +1,314 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Book a lesson">
+  <p class="eyebrow">Booking</p>
+  <h1 class="text-2xl mt-1 mb-5">Find a lesson</h1>
+
+  <div class="surface-card p-4 mb-6 grid gap-3 sm:grid-cols-4">
+    <div>
+      <label class="form-label" for="f-from">From</label>
+      <input class="field" type="date" id="f-from" />
+    </div>
+    <div>
+      <label class="form-label" for="f-to">To</label>
+      <input class="field" type="date" id="f-to" />
+    </div>
+    <div>
+      <label class="form-label" for="f-coach">Coach</label>
+      <select class="field" id="f-coach"><option value="">Any coach</option></select>
+    </div>
+    <div>
+      <label class="form-label" for="f-time">Time of day</label>
+      <select class="field" id="f-time">
+        <option value="">Any time</option>
+        <option value="morning">Morning (before 12)</option>
+        <option value="afternoon">Afternoon (12–5)</option>
+        <option value="evening">Evening (after 5)</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="board"><p class="text-mist-500 text-sm">Loading timetable…</p></div>
+
+  <!-- booking / waitlist panel -->
+  <div id="panel-backdrop" class="hidden fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
+    <div class="surface-card w-full sm:max-w-md p-6 rounded-b-none sm:rounded-b-[var(--radius-xl)] max-h-[90dvh] overflow-y-auto">
+      <div class="flex items-start justify-between gap-3">
+        <h2 id="panel-title" class="text-lg">Book lesson</h2>
+        <button id="panel-close" class="btn btn-ghost btn-sm">Close</button>
+      </div>
+      <p id="panel-sub" class="text-sm text-mist-400 mt-1"></p>
+      <div class="mt-5 flex flex-col gap-4">
+        <div>
+          <label class="form-label" for="p-athlete">Athlete</label>
+          <select class="field" id="p-athlete"></select>
+        </div>
+        <div>
+          <label class="form-label" for="p-coach">Coach</label>
+          <select class="field" id="p-coach"></select>
+        </div>
+        <div id="p-freq-wrap">
+          <label class="form-label">How often?</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="p-oneoff" class="btn btn-ghost btn-sm is-active">One-off</button>
+            <button type="button" id="p-weekly" class="btn btn-ghost btn-sm">Weekly until cancelled</button>
+          </div>
+          <p id="p-weekly-hint" class="hidden mt-1.5 text-xs text-mist-500">
+            Books this time every week for as long as the club runs the slot. Cancel any time.
+          </p>
+        </div>
+        <p id="p-policy" class="text-xs text-mist-500"></p>
+        <button id="p-confirm" class="btn btn-primary">Confirm booking</button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    #p-oneoff.is-active, #p-weekly.is-active {
+      border-color: var(--color-ignite-500);
+      color: var(--color-ignite-400);
+      background: color-mix(in srgb, var(--color-ignite-500) 10%, transparent);
+    }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
+
+    type Coach = { id: string; name: string; busy: boolean };
+    type Slot = {
+      id: string; slot_date: string; start_time: string; end_time: string;
+      capacity: number; series_id: string | null; notes: string | null;
+      booked: number; waiting: number; coaches: Coach[];
+    };
+
+    const board = document.getElementById('board')!;
+    const fFrom = document.getElementById('f-from') as HTMLInputElement;
+    const fTo = document.getElementById('f-to') as HTMLInputElement;
+    const fCoach = document.getElementById('f-coach') as HTMLSelectElement;
+    const fTime = document.getElementById('f-time') as HTMLSelectElement;
+
+    let slots: Slot[] = [];
+    let athletes: Awaited<ReturnType<typeof myAthletes>> = [];
+    let policyText = '';
+    let mode: 'book' | 'waitlist' = 'book';
+    let activeSlot: Slot | null = null;
+    let weekly = false;
+
+    const today = new Date();
+    fFrom.value = today.toISOString().slice(0, 10);
+    const to = new Date(today);
+    to.setDate(to.getDate() + 14);
+    fTo.value = to.toISOString().slice(0, 10);
+
+    async function load() {
+      const { data, error } = await supabase.rpc('get_slot_board', {
+        p_from: fFrom.value,
+        p_to: fTo.value,
+      });
+      if (error) return toast(errMsg(error), 'err');
+      slots = (data ?? []) as Slot[];
+
+      // Coach filter options from what's actually on offer
+      const coachMap = new Map<string, string>();
+      slots.forEach((s) => s.coaches.forEach((c) => coachMap.set(c.id, c.name)));
+      const current = fCoach.value;
+      fCoach.innerHTML =
+        '<option value="">Any coach</option>' +
+        [...coachMap.entries()]
+          .sort((a, b) => a[1].localeCompare(b[1]))
+          .map(([id, name]) => `<option value="${id}">${esc(name)}</option>`)
+          .join('');
+      fCoach.value = current;
+      render();
+    }
+
+    function inTimeband(t: string): boolean {
+      if (!fTime.value) return true;
+      const h = parseInt(t.slice(0, 2), 10);
+      if (fTime.value === 'morning') return h < 12;
+      if (fTime.value === 'afternoon') return h >= 12 && h < 17;
+      return h >= 17;
+    }
+
+    function render() {
+      const now = new Date();
+      const filtered = slots.filter((s) => {
+        if (!inTimeband(s.start_time)) return false;
+        if (fCoach.value && !s.coaches.some((c) => c.id === fCoach.value)) return false;
+        if (new Date(s.slot_date + 'T' + s.end_time) < now) return false;
+        return true;
+      });
+
+      if (!filtered.length) {
+        board.innerHTML =
+          '<div class="surface-card p-8 text-center text-mist-500 text-sm">No slots match — try widening the dates or clearing filters.</div>';
+        return;
+      }
+
+      const byDate = new Map<string, Slot[]>();
+      filtered.forEach((s) => {
+        (byDate.get(s.slot_date) ?? byDate.set(s.slot_date, []).get(s.slot_date)!).push(s);
+      });
+
+      board.innerHTML = [...byDate.entries()]
+        .map(
+          ([date, daySlots]) => `
+        <h2 class="text-sm font-display font-semibold uppercase tracking-widest text-mist-400 mt-6 mb-2">${fmtDate(date)}</h2>
+        <div class="grid gap-3 sm:grid-cols-2">
+          ${daySlots
+            .map((s) => {
+              const free = s.capacity - s.booked;
+              const freeCoaches = s.coaches.filter((c) => !c.busy);
+              const bookable = free > 0 && freeCoaches.length > 0;
+              return `
+            <div class="surface-card p-4">
+              <div class="flex items-center justify-between gap-2">
+                <p class="font-display font-semibold">${fmtTime(s.start_time)}–${fmtTime(s.end_time)}</p>
+                <span class="pill ${bookable ? 'pill-success' : 'pill-danger'}">
+                  ${bookable ? `${Math.min(free, freeCoaches.length)} space${Math.min(free, freeCoaches.length) === 1 ? '' : 's'}` : 'Full'}
+                </span>
+              </div>
+              ${s.series_id ? '<span class="pill pill-accent mt-2">Runs weekly</span>' : ''}
+              <p class="text-xs text-mist-400 mt-2">
+                ${
+                  s.coaches.length
+                    ? 'Coaches: ' + s.coaches.map((c) => `<span class="${c.busy ? 'line-through opacity-50' : ''}">${esc(c.name)}</span>`).join(', ')
+                    : 'No coaches yet'
+                }
+              </p>
+              ${s.notes ? `<p class="text-xs text-mist-500 mt-1">${esc(s.notes)}</p>` : ''}
+              <div class="mt-3 flex gap-2">
+                ${
+                  bookable
+                    ? `<button class="btn btn-primary btn-sm" data-book="${s.id}">Book</button>`
+                    : `<button class="btn btn-ghost btn-sm" data-wait="${s.id}">Join waiting list${s.waiting ? ` (${s.waiting} waiting)` : ''}</button>`
+                }
+              </div>
+            </div>`;
+            })
+            .join('')}
+        </div>`
+        )
+        .join('');
+
+      board.querySelectorAll<HTMLButtonElement>('[data-book]').forEach((b) =>
+        b.addEventListener('click', () => openPanel(b.dataset.book!, 'book'))
+      );
+      board.querySelectorAll<HTMLButtonElement>('[data-wait]').forEach((b) =>
+        b.addEventListener('click', () => openPanel(b.dataset.wait!, 'waitlist'))
+      );
+    }
+
+    // ---------- booking panel ----------
+    const backdrop = document.getElementById('panel-backdrop')!;
+    const pAthlete = document.getElementById('p-athlete') as HTMLSelectElement;
+    const pCoach = document.getElementById('p-coach') as HTMLSelectElement;
+    const pConfirm = document.getElementById('p-confirm') as HTMLButtonElement;
+
+    function openPanel(slotId: string, m: 'book' | 'waitlist') {
+      activeSlot = slots.find((s) => s.id === slotId) ?? null;
+      if (!activeSlot) return;
+      mode = m;
+      weekly = false;
+      document.getElementById('p-oneoff')?.classList.add('is-active');
+      document.getElementById('p-weekly')?.classList.remove('is-active');
+      document.getElementById('p-weekly-hint')?.classList.add('hidden');
+
+      if (!athletes.length) {
+        toast('Add an athlete first — go to the Athletes page.', 'err');
+        return;
+      }
+
+      document.getElementById('panel-title')!.textContent =
+        m === 'book' ? 'Book lesson' : 'Join waiting list';
+      document.getElementById('panel-sub')!.textContent =
+        `${fmtDate(activeSlot.slot_date)} · ${fmtTime(activeSlot.start_time)}–${fmtTime(activeSlot.end_time)}`;
+      pAthlete.innerHTML = athletes
+        .map((a) => `<option value="${a.id}">${esc(a.name)}</option>`)
+        .join('');
+
+      const options =
+        m === 'book'
+          ? activeSlot.coaches.filter((c) => !c.busy)
+          : activeSlot.coaches;
+      pCoach.innerHTML =
+        (m === 'waitlist' ? '<option value="">Any coach</option>' : '') +
+        options.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+
+      const freq = document.getElementById('p-freq-wrap')!;
+      freq.classList.toggle('hidden', m === 'waitlist' || !activeSlot.series_id);
+      document.getElementById('p-policy')!.textContent = m === 'book' ? policyText : '';
+      pConfirm.textContent = m === 'book' ? 'Confirm booking' : 'Join waiting list';
+      backdrop.classList.remove('hidden');
+    }
+
+    document.getElementById('panel-close')?.addEventListener('click', () => backdrop.classList.add('hidden'));
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) backdrop.classList.add('hidden');
+    });
+    document.getElementById('p-oneoff')?.addEventListener('click', (e) => {
+      weekly = false;
+      (e.currentTarget as HTMLElement).classList.add('is-active');
+      document.getElementById('p-weekly')?.classList.remove('is-active');
+      document.getElementById('p-weekly-hint')?.classList.add('hidden');
+    });
+    document.getElementById('p-weekly')?.addEventListener('click', (e) => {
+      weekly = true;
+      (e.currentTarget as HTMLElement).classList.add('is-active');
+      document.getElementById('p-oneoff')?.classList.remove('is-active');
+      document.getElementById('p-weekly-hint')?.classList.remove('hidden');
+    });
+
+    pConfirm.addEventListener('click', async () => {
+      if (!activeSlot) return;
+      pConfirm.disabled = true;
+      try {
+        if (mode === 'book') {
+          const { data, error } = await supabase.rpc('book_slot', {
+            p_slot_id: activeSlot.id,
+            p_athlete_id: pAthlete.value,
+            p_coach_id: pCoach.value,
+            p_weekly: weekly,
+          });
+          if (error) throw error;
+          const skipped = (data as { skipped?: number })?.skipped ?? 0;
+          toast(
+            weekly
+              ? `Weekly lesson booked!${skipped ? ` (${skipped} week${skipped === 1 ? '' : 's'} unavailable and skipped)` : ''}`
+              : 'Lesson booked!'
+          );
+        } else {
+          const { error } = await supabase.rpc('join_waitlist', {
+            p_slot_id: activeSlot.id,
+            p_athlete_id: pAthlete.value,
+            p_coach_id: pCoach.value || null,
+          });
+          if (error) throw error;
+          toast("You're on the waiting list — we'll offer you the space if it frees up.");
+        }
+        backdrop.classList.add('hidden');
+        await load();
+      } catch (e) {
+        toast(errMsg(e), 'err');
+      } finally {
+        pConfirm.disabled = false;
+      }
+    });
+
+    [fFrom, fTo].forEach((el) => el.addEventListener('change', load));
+    [fCoach, fTime].forEach((el) => el.addEventListener('change', render));
+
+    (async () => {
+      await requireAuth();
+      athletes = await myAthletes();
+      const { data: settings } = await supabase.from('club_settings').select('cancellation_policy').single();
+      policyText = settings?.cancellation_policy ?? '';
+      await load();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

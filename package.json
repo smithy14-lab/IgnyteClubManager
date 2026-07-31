@@ -1,0 +1,30 @@
+{
+  "name": "ignyte-club-manager",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ignyte Club Manager — private lesson booking & progression tracking for cheer tumble and all-star dance.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.1.1",
+    "@fontsource-variable/space-grotesk": "^5.1.1",
+    "@supabase/supabase-js": "^2.49.0",
+    "astro": "^7.0.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@tailwindcss/vite": "^4.3.1",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^5.8.2"
+  }
+}

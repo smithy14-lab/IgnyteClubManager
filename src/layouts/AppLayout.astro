@@ -1,0 +1,262 @@
+---
+/**
+ * Shell for every page: brand header, role-aware nav, notification bell,
+ * install-app button, offline banner, PWA wiring. Auth state is resolved in
+ * the browser (the site is fully static), so nav items are hidden until the
+ * signed-in user's role is known.
+ */
+import '@fontsource-variable/inter';
+import '@fontsource-variable/space-grotesk';
+import '../styles/global.css';
+import IgnyteMark from '../components/IgnyteMark.astro';
+
+interface Props {
+  title: string;
+  /** Public pages (login/signup/landing) hide the app nav entirely. */
+  chrome?: boolean;
+}
+const { title, chrome = true } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title} · Ignyte Club Manager</title>
+    <meta name="description" content="Private lesson booking & skill progression for cheer tumble and all-star dance." />
+    <meta name="theme-color" content="#07070b" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="robots" content="noindex" />
+  </head>
+  <body>
+    <!-- Shared flame gradient used by every IgnyteMark on the page -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <linearGradient id="ignyte-flame-gradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffc23d"></stop>
+          <stop offset="45%" stop-color="#ff6a1a"></stop>
+          <stop offset="100%" stop-color="#ff1f8e"></stop>
+        </linearGradient>
+      </defs>
+    </svg>
+
+    <div
+      id="offline-banner"
+      class="hidden bg-charge-400/15 border-b border-charge-400/30 text-charge-400 text-center text-xs font-semibold py-1.5 px-4"
+    >
+      You're offline — showing your last-loaded info. Booking needs a connection.
+    </div>
+
+    {
+      chrome && (
+        <header class="sticky top-0 z-40 border-b border-ink-700 bg-ink-950/85 backdrop-blur-md">
+          <div class="container-app flex h-16 items-center gap-3">
+            <a href="/dashboard" class="flex items-center gap-2 shrink-0">
+              <IgnyteMark size={26} />
+              <span class="font-display font-semibold tracking-tight text-mist-100">
+                Ignyte <span class="text-mist-400 font-normal hidden sm:inline">Club Manager</span>
+              </span>
+            </a>
+
+            <nav id="app-nav" class="ml-auto flex items-center gap-1 text-sm overflow-x-auto">
+              <a data-roles="parent,athlete,coach,admin" href="/dashboard" class="nav-link hidden">Home</a>
+              <a data-roles="parent,athlete" href="/book" class="nav-link hidden">Book</a>
+              <a data-roles="parent,athlete" href="/bookings" class="nav-link hidden">Bookings</a>
+              <a data-roles="parent" href="/athletes" class="nav-link hidden">Athletes</a>
+              <a data-roles="parent,athlete" href="/progress" class="nav-link hidden">Progress</a>
+              <a data-roles="coach" href="/coach" class="nav-link hidden">Coaching</a>
+              <a data-roles="admin" href="/admin" class="nav-link hidden">Admin</a>
+            </nav>
+
+            <button
+              id="notif-btn"
+              class="relative hidden rounded-full border border-ink-600 p-2 text-mist-300 hover:text-ignite-400 hover:border-ignite-500 transition-colors"
+              aria-label="Notifications"
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+              </svg>
+              <span
+                id="notif-dot"
+                class="hidden absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ignite-500 ring-2 ring-ink-950"
+              />
+            </button>
+
+            <button id="signout-btn" class="hidden btn btn-ghost btn-sm">Sign out</button>
+          </div>
+
+          <div
+            id="notif-panel"
+            class="hidden absolute right-3 top-[4.2rem] w-[min(92vw,22rem)] max-h-[70vh] overflow-y-auto surface-card p-2 z-50"
+          >
+            <p class="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-widest text-mist-500">Notifications</p>
+            <div id="notif-list" class="flex flex-col" />
+          </div>
+        </header>
+      )
+    }
+
+    <main class="container-app py-6 pb-24">
+      <slot />
+    </main>
+
+    <div id="install-hint" class="hidden fixed bottom-4 inset-x-4 sm:left-auto sm:w-96 z-50 surface-card p-4">
+      <div class="flex items-start gap-3">
+        <IgnyteMark size={30} />
+        <div class="flex-1">
+          <p class="font-display font-semibold text-sm">Install Ignyte Club Manager</p>
+          <p class="text-xs text-mist-400 mt-0.5">Add it to your home screen for quick booking &amp; offline access.</p>
+          <div class="mt-2.5 flex gap-2">
+            <button id="install-btn" class="btn btn-primary btn-sm">Install</button>
+            <button id="install-dismiss" class="btn btn-ghost btn-sm">Not now</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .nav-link {
+        padding: 0.4rem 0.7rem;
+        border-radius: 999px;
+        color: var(--color-mist-300);
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .nav-link:hover {
+        color: var(--color-ignite-400);
+        background: var(--color-ink-800);
+      }
+    </style>
+
+    <script>
+      import { supabase, supabaseConfigured } from '../lib/supabase';
+      import { esc, fmtDateTime } from '../lib/app';
+
+      // ------- offline banner -------
+      const banner = document.getElementById('offline-banner');
+      const syncOnline = () => banner?.classList.toggle('hidden', navigator.onLine);
+      addEventListener('online', syncOnline);
+      addEventListener('offline', syncOnline);
+      syncOnline();
+
+      // ------- service worker -------
+      if ('serviceWorker' in navigator) {
+        addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+      }
+
+      // ------- install prompt (Chromium) + iOS hint -------
+      let deferredPrompt: Event | null = null;
+      const hint = document.getElementById('install-hint');
+      const installBtn = document.getElementById('install-btn');
+      const dismissed = () => localStorage.getItem('ignyte-install-dismissed') === '1';
+      const standalone =
+        matchMedia('(display-mode: standalone)').matches ||
+        (navigator as unknown as { standalone?: boolean }).standalone === true;
+
+      addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        if (!dismissed() && !standalone) hint?.classList.remove('hidden');
+      });
+      installBtn?.addEventListener('click', async () => {
+        hint?.classList.add('hidden');
+        const p = deferredPrompt as unknown as { prompt: () => void } | null;
+        p?.prompt();
+      });
+      document.getElementById('install-dismiss')?.addEventListener('click', () => {
+        localStorage.setItem('ignyte-install-dismissed', '1');
+        hint?.classList.add('hidden');
+      });
+      // iOS Safari has no beforeinstallprompt — show a one-time hint instead.
+      const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      if (isIos && !standalone && !dismissed()) {
+        setTimeout(() => {
+          const body = hint?.querySelector('p.text-xs');
+          if (body)
+            body.textContent = 'Tap the Share button in Safari, then "Add to Home Screen".';
+          installBtn?.classList.add('hidden');
+          hint?.classList.remove('hidden');
+        }, 2500);
+      }
+
+      // ------- auth-aware nav + notifications -------
+      const nav = document.getElementById('app-nav');
+      if (nav && supabaseConfigured) {
+        (async () => {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session) return;
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', data.session.user.id)
+            .single();
+          const role = profile?.role ?? 'parent';
+          nav.querySelectorAll<HTMLElement>('[data-roles]').forEach((el) => {
+            if ((el.dataset.roles ?? '').split(',').includes(role)) el.classList.remove('hidden');
+          });
+          document.getElementById('signout-btn')?.classList.remove('hidden');
+          document.getElementById('notif-btn')?.classList.remove('hidden');
+
+          document.getElementById('signout-btn')?.addEventListener('click', async () => {
+            await supabase.auth.signOut();
+            location.href = '/login';
+          });
+
+          // Notifications
+          const dot = document.getElementById('notif-dot');
+          const panel = document.getElementById('notif-panel');
+          const list = document.getElementById('notif-list');
+          const loadNotifs = async () => {
+            const { data: notifs } = await supabase
+              .from('notifications')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .limit(20);
+            if (!notifs) return;
+            dot?.classList.toggle('hidden', !notifs.some((n) => !n.read));
+            if (list) {
+              list.innerHTML = notifs.length
+                ? notifs
+                    .map(
+                      (n) => `
+                  <div class="px-3 py-2.5 rounded-lg hover:bg-ink-800 ${n.read ? 'opacity-60' : ''}">
+                    <p class="text-sm font-semibold">${esc(n.title)}</p>
+                    <p class="text-xs text-mist-400 mt-0.5">${esc(n.body)}</p>
+                    <p class="text-[0.65rem] text-mist-500 mt-1">${fmtDateTime(n.created_at)}</p>
+                  </div>`
+                    )
+                    .join('')
+                : '<p class="px-3 py-4 text-sm text-mist-500">Nothing yet.</p>';
+            }
+          };
+          loadNotifs();
+
+          document.getElementById('notif-btn')?.addEventListener('click', async () => {
+            const opening = panel?.classList.contains('hidden');
+            panel?.classList.toggle('hidden');
+            if (opening) {
+              await loadNotifs();
+              await supabase.from('notifications').update({ read: true }).eq('read', false);
+              dot?.classList.add('hidden');
+            }
+          });
+          document.addEventListener('click', (e) => {
+            if (
+              !panel?.classList.contains('hidden') &&
+              !panel?.contains(e.target as Node) &&
+              !document.getElementById('notif-btn')?.contains(e.target as Node)
+            )
+              panel?.classList.add('hidden');
+          });
+        })();
+      }
+    </script>
+  </body>
+</html>

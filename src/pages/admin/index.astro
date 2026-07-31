@@ -1,0 +1,250 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Club admin">
+  <p class="eyebrow">Club admin</p>
+  <h1 class="text-2xl mt-1 mb-5">Manage the club</h1>
+
+  <div class="flex flex-wrap gap-2 mb-5">
+    <button data-tab="slots" class="tab-btn btn btn-primary btn-sm">Slots</button>
+    <button data-tab="users" class="tab-btn btn btn-ghost btn-sm">People</button>
+    <button data-tab="settings" class="tab-btn btn btn-ghost btn-sm">Settings</button>
+  </div>
+
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../../lib/supabase';
+    import { requireAuth, fmtDate, fmtTime, esc, toast, errMsg } from '../../lib/app';
+
+    const content = document.getElementById('content')!;
+    let tab = 'slots';
+
+    document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((b) =>
+      b.addEventListener('click', () => {
+        tab = b.dataset.tab!;
+        document
+          .querySelectorAll('.tab-btn')
+          .forEach((x) => (x.className = 'tab-btn btn btn-ghost btn-sm'));
+        b.className = 'tab-btn btn btn-primary btn-sm';
+        render();
+      })
+    );
+
+    async function render() {
+      content.innerHTML = '<p class="text-mist-500 text-sm">Loading…</p>';
+      if (tab === 'slots') await renderSlots();
+      else if (tab === 'users') await renderUsers();
+      else await renderSettings();
+    }
+
+    // ---------------- Slots ----------------
+    async function renderSlots() {
+      const from = new Date().toISOString().slice(0, 10);
+      const toD = new Date();
+      toD.setDate(toD.getDate() + 56);
+      const { data: board } = await supabase.rpc('get_slot_board', {
+        p_from: from,
+        p_to: toD.toISOString().slice(0, 10),
+      });
+      type Slot = {
+        id: string; slot_date: string; start_time: string; end_time: string;
+        capacity: number; series_id: string | null; booked: number; waiting: number;
+        coaches: { name: string }[];
+      };
+      const slots = (board ?? []) as Slot[];
+
+      content.innerHTML = `
+        <div class="surface-card p-5 mb-6 max-w-xl">
+          <h2 class="text-base font-semibold mb-4">Add slots</h2>
+          <form id="slot-form" class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="form-label" for="s-date">First date</label>
+              <input class="field" type="date" id="s-date" required min="${from}" />
+            </div>
+            <div>
+              <label class="form-label" for="s-start">Start time (30 min lesson)</label>
+              <input class="field" type="time" id="s-start" required step="300" />
+            </div>
+            <div>
+              <label class="form-label" for="s-cap">Spaces (simultaneous 1-2-1s)</label>
+              <input class="field" type="number" id="s-cap" min="1" max="20" value="4" required />
+            </div>
+            <div>
+              <label class="form-label" for="s-weeks">Repeat weekly for</label>
+              <select class="field" id="s-weeks">
+                <option value="1">One-off (just this date)</option>
+                ${[4, 6, 8, 10, 12, 16, 20, 26].map((w) => `<option value="${w}">${w} weeks</option>`).join('')}
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="form-label" for="s-notes">Notes (optional)</label>
+              <input class="field" id="s-notes" placeholder="e.g. Tumble track only" />
+            </div>
+            <button class="btn btn-primary sm:col-span-2" type="submit">Create slot(s)</button>
+          </form>
+        </div>
+        <h2 class="text-base font-semibold mb-3">Upcoming slots (8 weeks)</h2>
+        <div id="slot-list" class="grid gap-3 sm:grid-cols-2">
+          ${
+            slots.length
+              ? slots
+                  .map(
+                    (s) => `
+              <div class="surface-card p-4">
+                <div class="flex items-center justify-between gap-2">
+                  <p class="font-display font-semibold">${fmtDate(s.slot_date)} · ${fmtTime(s.start_time)}–${fmtTime(s.end_time)}</p>
+                  ${s.series_id ? '<span class="pill pill-accent">weekly</span>' : ''}
+                </div>
+                <p class="text-xs text-mist-400 mt-1.5">
+                  ${s.booked}/${s.capacity} booked${s.waiting ? ` · ${s.waiting} waiting` : ''}
+                </p>
+                <p class="text-xs text-mist-500 mt-1">${s.coaches.length ? 'Coaches: ' + s.coaches.map((c) => esc(c.name)).join(', ') : 'No coaches yet'}</p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button class="btn btn-danger btn-sm" data-del="${s.id}">Remove</button>
+                  ${s.series_id ? `<button class="btn btn-ghost btn-sm" data-extend="${s.series_id}">Extend series</button>` : ''}
+                </div>
+              </div>`
+                  )
+                  .join('')
+              : '<p class="text-sm text-mist-500 sm:col-span-2">No upcoming slots.</p>'
+          }
+        </div>`;
+
+      const form = document.getElementById('slot-form') as HTMLFormElement;
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const start = (document.getElementById('s-start') as HTMLInputElement).value;
+        const [h, m] = start.split(':').map(Number);
+        const endMinutes = h * 60 + m + 30;
+        const end = `${String(Math.floor(endMinutes / 60) % 24).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+        const { error } = await supabase.rpc('admin_create_slots', {
+          p_date: (document.getElementById('s-date') as HTMLInputElement).value,
+          p_start: start,
+          p_end: end,
+          p_capacity: Number((document.getElementById('s-cap') as HTMLInputElement).value),
+          p_weeks: Number((document.getElementById('s-weeks') as HTMLSelectElement).value),
+          p_notes: (document.getElementById('s-notes') as HTMLInputElement).value || null,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Slot(s) created.');
+        render();
+      });
+
+      content.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Remove this slot? Existing bookings are cancelled and families notified.')) return;
+          const { error } = await supabase.rpc('admin_delete_slot', { p_slot_id: b.dataset.del });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Slot removed.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-extend]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const weeks = prompt('Extend this weekly series by how many weeks?', '6');
+          if (!weeks) return;
+          const { data, error } = await supabase.rpc('admin_extend_series', {
+            p_series_id: b.dataset.extend,
+            p_weeks: Number(weeks),
+          });
+          if (error) return toast(errMsg(error), 'err');
+          toast(`Series extended by ${data} week(s) — weekly bookings rolled forward.`);
+          render();
+        })
+      );
+    }
+
+    // ---------------- People ----------------
+    async function renderUsers() {
+      const { data: users } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      content.innerHTML = `
+        <div class="surface-card p-5">
+          <h2 class="text-base font-semibold mb-1">Accounts</h2>
+          <p class="text-xs text-mist-500 mb-3">Change a role to make someone a coach or admin. Coaches appear in booking as soon as they join a slot.</p>
+          ${(users ?? [])
+            .map(
+              (u) => `
+            <div class="py-3 border-t border-ink-700 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="text-sm font-medium">${esc(u.full_name)}</p>
+                <p class="text-xs text-mist-500">${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}</p>
+              </div>
+              <select class="field !w-auto !py-1 !text-xs" data-user="${u.id}">
+                ${['parent', 'athlete', 'coach', 'admin']
+                  .map((r) => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${r}</option>`)
+                  .join('')}
+              </select>
+            </div>`
+            )
+            .join('')}
+        </div>`;
+
+      content.querySelectorAll<HTMLSelectElement>('[data-user]').forEach((sel) =>
+        sel.addEventListener('change', async () => {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ role: sel.value })
+            .eq('id', sel.dataset.user);
+          if (error) return toast(errMsg(error), 'err');
+          toast('Role updated.');
+        })
+      );
+    }
+
+    // ---------------- Settings ----------------
+    async function renderSettings() {
+      const { data: s } = await supabase.from('club_settings').select('*').single();
+      content.innerHTML = `
+        <div class="surface-card p-5 max-w-xl">
+          <h2 class="text-base font-semibold mb-4">Club settings</h2>
+          <form id="settings-form" class="flex flex-col gap-4">
+            <div>
+              <label class="form-label" for="c-name">Club name</label>
+              <input class="field" id="c-name" value="${esc(s?.club_name)}" required />
+            </div>
+            <div>
+              <label class="form-label" for="c-notice">Cancellation notice (hours)</label>
+              <input class="field" id="c-notice" type="number" min="0" max="168" value="${s?.cancellation_notice_hours ?? 24}" required />
+              <p class="text-xs text-mist-500 mt-1">Families can always cancel — inside this window it's recorded as a late cancellation (still payable) and the space is offered to the waiting list.</p>
+            </div>
+            <div>
+              <label class="form-label" for="c-policy">Cancellation policy (shown when booking)</label>
+              <textarea class="field" id="c-policy" rows="3" required>${esc(s?.cancellation_policy)}</textarea>
+            </div>
+            <div>
+              <label class="form-label" for="c-offer">Waiting list offers expire after (hours)</label>
+              <input class="field" id="c-offer" type="number" min="1" max="168" value="${s?.waitlist_offer_hours ?? 24}" required />
+            </div>
+            <button class="btn btn-primary" type="submit">Save settings</button>
+          </form>
+        </div>`;
+
+      (document.getElementById('settings-form') as HTMLFormElement).addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const { error } = await supabase
+          .from('club_settings')
+          .update({
+            club_name: (document.getElementById('c-name') as HTMLInputElement).value,
+            cancellation_notice_hours: Number((document.getElementById('c-notice') as HTMLInputElement).value),
+            cancellation_policy: (document.getElementById('c-policy') as HTMLTextAreaElement).value,
+            waitlist_offer_hours: Number((document.getElementById('c-offer') as HTMLInputElement).value),
+          })
+          .eq('id', 1);
+        if (error) return toast(errMsg(error), 'err');
+        toast('Settings saved.');
+      });
+    }
+
+    (async () => {
+      await requireAuth(['admin']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>
