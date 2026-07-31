@@ -20,9 +20,17 @@ import AppLayout from '../layouts/AppLayout.astro';
         <input class="field" id="dob" name="dob" type="date" required />
       </div>
       <div>
-        <label class="form-label" for="notes">Notes (optional — medical, goals…)</label>
+        <label class="form-label" for="notes">Notes (goals, experience…)</label>
         <textarea class="field" id="notes" name="notes" rows="2"></textarea>
       </div>
+      <div>
+        <label class="form-label" for="medical">Medical notes (visible to their coaches)</label>
+        <textarea class="field" id="medical" name="medical" rows="2" placeholder="Allergies, conditions, injuries…"></textarea>
+      </div>
+      <label class="text-sm text-mist-300 flex gap-2 items-start">
+        <input type="checkbox" id="consent" name="consent" class="mt-1" />
+        <span>Media consent — coaches may add short skill videos to this athlete's journey (only your family and their coaches can see them).</span>
+      </label>
       <button class="btn btn-primary" type="submit">Add athlete</button>
     </form>
   </div>
@@ -39,21 +47,61 @@ import AppLayout from '../layouts/AppLayout.astro';
         ? athletes
             .map(
               (a) => `
-        <div class="surface-card p-5">
+        <div class="surface-card p-5" data-card="${a.id}">
           <div class="flex items-center justify-between gap-2">
             <h3 class="font-semibold">${esc(a.name)}</h3>
-            <span class="pill">${ageFromDob(a.dob)} yrs</span>
+            <div class="flex gap-1.5 items-center">
+              ${(a as unknown as { medical_notes?: string }).medical_notes ? '<span class="pill pill-warn" title="Has medical notes">🚑</span>' : ''}
+              ${(a as unknown as { media_consent?: boolean }).media_consent ? '<span class="pill" title="Media consent given">🎬</span>' : ''}
+              <span class="pill">${ageFromDob(a.dob)} yrs</span>
+            </div>
           </div>
           ${a.notes ? `<p class="text-xs text-mist-400 mt-1.5">${esc(a.notes)}</p>` : ''}
-          <div class="mt-3 flex gap-2">
-            <a class="btn btn-ghost btn-sm" href="/progress?athlete=${a.id}">Progression</a>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <a class="btn btn-ghost btn-sm" href="/progress?athlete=${a.id}">Journey</a>
+            <button class="btn btn-ghost btn-sm" data-edit="${a.id}">Edit</button>
             <button class="btn btn-danger btn-sm" data-remove="${a.id}">Remove</button>
+          </div>
+          <div class="edit-panel hidden mt-3 pt-3 border-t border-ink-700 flex flex-col gap-3">
+            <div><label class="form-label">Name</label><input class="field" data-f="name" value="${esc(a.name)}" /></div>
+            <div><label class="form-label">Date of birth</label><input class="field" data-f="dob" type="date" value="${a.dob}" /></div>
+            <div><label class="form-label">Notes</label><textarea class="field" data-f="notes" rows="2">${esc(a.notes ?? '')}</textarea></div>
+            <div><label class="form-label">Medical notes (visible to coaches)</label><textarea class="field" data-f="medical" rows="2">${esc((a as unknown as { medical_notes?: string }).medical_notes ?? '')}</textarea></div>
+            <label class="text-xs text-mist-300 flex gap-2 items-start">
+              <input type="checkbox" data-f="consent" ${(a as unknown as { media_consent?: boolean }).media_consent ? 'checked' : ''} class="mt-0.5" />
+              <span>Media consent — allow skill videos on their journey</span>
+            </label>
+            <button class="btn btn-primary btn-sm" data-save="${a.id}">Save changes</button>
           </div>
         </div>`
             )
             .join('')
         : '<p class="text-sm text-mist-500 sm:col-span-2">No athletes yet — add one below to start booking lessons.</p>';
 
+      list.querySelectorAll<HTMLButtonElement>('[data-edit]').forEach((b) =>
+        b.addEventListener('click', () =>
+          list.querySelector(`[data-card="${b.dataset.edit}"] .edit-panel`)?.classList.toggle('hidden')
+        )
+      );
+      list.querySelectorAll<HTMLButtonElement>('[data-save]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const card = list.querySelector(`[data-card="${b.dataset.save}"]`)!;
+          const val = (f: string) => (card.querySelector(`[data-f="${f}"]`) as HTMLInputElement).value;
+          const { error } = await supabase
+            .from('athletes')
+            .update({
+              name: val('name'),
+              dob: val('dob'),
+              notes: val('notes') || null,
+              medical_notes: val('medical') || null,
+              media_consent: (card.querySelector('[data-f="consent"]') as HTMLInputElement).checked,
+            })
+            .eq('id', b.dataset.save);
+          if (error) return toast(errMsg(error), 'err');
+          toast('Athlete updated.');
+          render();
+        })
+      );
       list.querySelectorAll<HTMLButtonElement>('[data-remove]').forEach((b) =>
         b.addEventListener('click', async () => {
           if (!confirm('Remove this athlete? Their bookings and progression history will be removed too.')) return;
@@ -70,12 +118,13 @@ import AppLayout from '../layouts/AppLayout.astro';
       const form = document.getElementById('add-form') as HTMLFormElement;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const fd = new FormData(form);
         const { error } = await supabase.from('athletes').insert({
           parent_id: profile.id,
-          name: String(fd.get('name')),
-          dob: String(fd.get('dob')),
-          notes: String(fd.get('notes') ?? '') || null,
+          name: (document.getElementById('name') as HTMLInputElement).value,
+          dob: (document.getElementById('dob') as HTMLInputElement).value,
+          notes: (document.getElementById('notes') as HTMLTextAreaElement).value || null,
+          medical_notes: (document.getElementById('medical') as HTMLTextAreaElement).value || null,
+          media_consent: (document.getElementById('consent') as HTMLInputElement).checked,
         });
         if (error) return toast(errMsg(error), 'err');
         toast('Athlete added!');

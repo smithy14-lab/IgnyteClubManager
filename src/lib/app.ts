@@ -1,6 +1,6 @@
 import { supabase, supabaseConfigured } from './supabase';
 
-export type Role = 'parent' | 'athlete' | 'coach' | 'admin';
+export type Role = 'parent' | 'athlete' | 'coach' | 'admin' | 'owner';
 
 export interface Profile {
   id: string;
@@ -47,7 +47,8 @@ export async function requireAuth(roles?: Role[]): Promise<Profile> {
     location.href = '/login';
     throw new Error('redirecting');
   }
-  if (roles && !roles.includes(profile.role)) {
+  // The platform owner can go anywhere.
+  if (roles && profile.role !== 'owner' && !roles.includes(profile.role)) {
     location.href = '/dashboard';
     throw new Error('redirecting');
   }

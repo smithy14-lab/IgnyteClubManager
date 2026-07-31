@@ -1,0 +1,65 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+
+const tiers = [
+  {
+    name: 'Founding Club',
+    price: 'Free',
+    sub: 'while in early access',
+    highlight: true,
+    features: [
+      'Unlimited coaches, families & athletes',
+      'Booking, waiting lists & weekly slots',
+      'Skill journeys, badges & milestone alerts',
+      'Registers + Excel coach-pay export',
+      'Credits & makeup tokens',
+      'Broadcasts, locations & admin tools',
+      'Direct line to the builders',
+    ],
+    cta: ['Become a founding club', '/contact'],
+  },
+  {
+    name: 'Club',
+    price: '£29/mo',
+    sub: 'when early access ends — founding clubs keep a lifetime discount',
+    highlight: false,
+    features: [
+      'Everything in Founding Club',
+      'Email notifications for families',
+      'Priority support',
+      'Your club branding',
+    ],
+    cta: ['Register interest', '/contact'],
+  },
+];
+---
+
+<AppLayout title="Pricing">
+  <section class="max-w-3xl mx-auto py-10 text-center animate-rise">
+    <p class="eyebrow justify-center flex">Pricing</p>
+    <h1 class="text-3xl mt-2">Priced like a club, <span class="ignite-text">not a franchise.</span></h1>
+    <p class="mt-3 text-mist-400 max-w-lg mx-auto">
+      No per-member fees. No card machine contracts. One flat price a single private lesson
+      pays for.
+    </p>
+    <div class="mt-8 grid gap-5 sm:grid-cols-2 text-left">
+      {tiers.map((t) => (
+        <div class={`surface-card p-6 ${t.highlight ? 'border-ignite-500/50' : ''}`} style={t.highlight ? 'box-shadow: var(--shadow-glow)' : ''}>
+          {t.highlight && <span class="pill pill-accent mb-3">Early access — now</span>}
+          <h2 class="text-lg font-semibold">{t.name}</h2>
+          <p class="mt-1"><span class="text-3xl font-display font-bold ignite-text">{t.price}</span></p>
+          <p class="text-xs text-mist-500 mt-0.5">{t.sub}</p>
+          <ul class="mt-4 flex flex-col gap-2">
+            {t.features.map((f) => (
+              <li class="text-sm text-mist-300 flex gap-2"><span class="text-ignite-400">✓</span>{f}</li>
+            ))}
+          </ul>
+          <a href={t.cta[1]} class={`btn ${t.highlight ? 'btn-primary' : 'btn-ghost'} mt-5 w-full`}>{t.cta[0]}</a>
+        </div>
+      ))}
+    </div>
+    <p class="mt-6 text-xs text-mist-500">
+      Payments for lessons stay between you and your families — we never take a cut.
+    </p>
+  </section>
+</AppLayout>

@@ -10,6 +10,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
     <button data-tab="slots" class="tab-btn btn btn-primary btn-sm">Slots</button>
     <button data-tab="bookings" class="tab-btn btn btn-ghost btn-sm">Bookings</button>
     <button data-tab="people" class="tab-btn btn btn-ghost btn-sm">People</button>
+    <button data-tab="broadcasts" class="tab-btn btn btn-ghost btn-sm">Messages</button>
     <button data-tab="locations" class="tab-btn btn btn-ghost btn-sm">Locations</button>
     <button data-tab="skills" class="tab-btn btn btn-ghost btn-sm">Skills</button>
     <button data-tab="export" class="tab-btn btn btn-ghost btn-sm">Export</button>
@@ -48,6 +49,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       if (tab === 'slots') await renderSlots();
       else if (tab === 'bookings') await renderBookings();
       else if (tab === 'people') await renderPeople();
+      else if (tab === 'broadcasts') await renderBroadcasts();
       else if (tab === 'locations') await renderLocations();
       else if (tab === 'skills') await renderSkills();
       else if (tab === 'export') await renderExport();
@@ -431,13 +433,74 @@ import AppLayout from '../../layouts/AppLayout.astro';
       load();
     }
 
+    // ============================ BROADCASTS ============================
+    async function renderBroadcasts() {
+      const [{ data: sent }, { data: readCounts }] = await Promise.all([
+        supabase.from('broadcasts').select('*').order('created_at', { ascending: false }).limit(30),
+        supabase.rpc('broadcast_read_counts'),
+      ]);
+      const reads = (readCounts ?? {}) as Record<string, number>;
+      content.innerHTML = `
+        <div class="surface-card p-5 mb-5 max-w-xl">
+          <h2 class="text-base font-semibold mb-3">Send a message</h2>
+          <div class="flex flex-col gap-3">
+            <select class="field" id="bc-aud">
+              <option value="everyone">Everyone</option>
+              <option value="parents">Parents & athletes</option>
+              <option value="coaches">Coaches</option>
+            </select>
+            <input class="field" id="bc-title" placeholder="Title (e.g. Gym closed Saturday)" />
+            <textarea class="field" id="bc-body" rows="3" placeholder="Message…"></textarea>
+            <button class="btn btn-primary" id="bc-send">Send broadcast</button>
+            <p class="text-xs text-mist-500">Lands in everyone's notification bell (and email, if enabled). You'll see who's read it below.</p>
+          </div>
+        </div>
+        <h2 class="text-base font-semibold mb-3">Sent messages</h2>
+        ${
+          (sent ?? []).length
+            ? (sent ?? [])
+                .map(
+                  (b) => `
+            <div class="surface-card p-4 mb-3">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-sm font-semibold">${esc(b.title)}</p>
+                <span class="pill ${(reads[b.id] ?? 0) >= b.recipient_count ? 'pill-success' : 'pill-warn'}">
+                  ${reads[b.id] ?? 0}/${b.recipient_count} read
+                </span>
+              </div>
+              <p class="text-xs text-mist-400 mt-1">${esc(b.body)}</p>
+              <p class="text-[0.65rem] text-mist-500 mt-1.5">To ${b.audience} · ${new Date(b.created_at).toLocaleString()}</p>
+            </div>`
+                )
+                .join('')
+            : '<p class="text-sm text-mist-500">Nothing sent yet.</p>'
+        }`;
+
+      document.getElementById('bc-send')?.addEventListener('click', async () => {
+        const title = (document.getElementById('bc-title') as HTMLInputElement).value.trim();
+        const body = (document.getElementById('bc-body') as HTMLTextAreaElement).value.trim();
+        if (!title || !body) return toast('Title and message are required.', 'err');
+        const { data, error } = await supabase.rpc('admin_broadcast', {
+          p_audience: (document.getElementById('bc-aud') as HTMLSelectElement).value,
+          p_title: title,
+          p_body: body,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast(`Sent to ${data} people.`);
+        render();
+      });
+    }
+
     // ============================ PEOPLE ============================
     async function renderPeople() {
-      const [{ data: users }, { data: coachProfiles }] = await Promise.all([
+      const [{ data: users }, { data: coachProfiles }, { data: ledger }] = await Promise.all([
         supabase.from('profiles').select('*').order('created_at', { ascending: false }),
         supabase.from('coach_profiles').select('*'),
+        supabase.from('credit_ledger').select('profile_id, delta'),
       ]);
       const cpMap = new Map((coachProfiles ?? []).map((c) => [c.coach_id, c]));
+      const creditMap = new Map<string, number>();
+      (ledger ?? []).forEach((r) => creditMap.set(r.profile_id, (creditMap.get(r.profile_id) ?? 0) + r.delta));
 
       content.innerHTML = `
         <div class="surface-card p-5">
@@ -453,7 +516,9 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   <p class="text-sm font-medium">${esc(u.full_name)}</p>
                   <p class="text-xs text-mist-500">${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}</p>
                 </div>
-                <div class="flex gap-2 items-center">
+                <div class="flex gap-2 items-center flex-wrap">
+                  ${['parent', 'athlete'].includes(u.role) ? `<span class="pill ${creditMap.get(u.id) ? 'pill-accent' : ''}">💳 ${creditMap.get(u.id) ?? 0}</span>
+                    <button class="btn btn-ghost btn-sm" data-credits="${u.id}" data-name="${esc(u.full_name)}">Credits</button>` : ''}
                   <select class="field !w-auto !py-1 !text-xs" data-user="${u.id}">
                     ${['parent', 'athlete', 'coach', 'admin'].map((r) => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${r}</option>`).join('')}
                   </select>
@@ -483,6 +548,21 @@ import AppLayout from '../../layouts/AppLayout.astro';
             .join('')}
         </div>`;
 
+      content.querySelectorAll<HTMLButtonElement>('[data-credits]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const amount = prompt(`Adjust lesson credits for ${b.dataset.name} (e.g. 10 to add a 10-pack, -2 to remove two):`);
+          if (!amount || !Number(amount)) return;
+          const reason = prompt('Reason (shown to the family):', Number(amount) > 0 ? 'Lesson pack purchased' : 'Adjustment') ?? 'Adjustment';
+          const { data, error } = await supabase.rpc('admin_adjust_credits', {
+            p_profile: b.dataset.credits,
+            p_delta: Number(amount),
+            p_reason: reason,
+          });
+          if (error) return toast(errMsg(error), 'err');
+          toast(`Done — new balance: ${data} credits.`);
+          render();
+        })
+      );
       content.querySelectorAll<HTMLSelectElement>('[data-user]').forEach((sel) =>
         sel.addEventListener('change', async () => {
           const { error } = await supabase.from('profiles').update({ role: sel.value }).eq('id', sel.dataset.user);
@@ -753,6 +833,10 @@ import AppLayout from '../../layouts/AppLayout.astro';
               <label class="form-label" for="c-offer">Waiting list offers expire after (hours)</label>
               <input class="field" id="c-offer" type="number" min="1" max="168" value="${s?.waitlist_offer_hours ?? 24}" required />
             </div>
+            <label class="text-sm text-mist-300 flex gap-2 items-start">
+              <input type="checkbox" id="c-makeup" ${s?.late_cancel_makeup_tokens ? 'checked' : ''} class="mt-1" />
+              <span>Grant a <strong>makeup token</strong> on late cancellations — the lesson stays payable, but the family gets a credit to rebook with.</span>
+            </label>
             <button class="btn btn-primary" type="submit">Save settings</button>
           </form>
         </div>`;
@@ -766,6 +850,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
             cancellation_notice_hours: Number((document.getElementById('c-notice') as HTMLInputElement).value),
             cancellation_policy: (document.getElementById('c-policy') as HTMLTextAreaElement).value,
             waitlist_offer_hours: Number((document.getElementById('c-offer') as HTMLInputElement).value),
+            late_cancel_makeup_tokens: (document.getElementById('c-makeup') as HTMLInputElement).checked,
           })
           .eq('id', 1);
         if (error) return toast(errMsg(error), 'err');

@@ -28,6 +28,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
         </div>
         <button id="prog-note-save" class="btn btn-primary btn-sm mt-2">Add note</button>
       </div>
+      <div class="mt-4 pt-4 border-t border-ink-700">
+        <label class="form-label">🎬 Add a skill video (needs media consent)</label>
+        <input type="file" id="prog-video" accept="video/*" capture="environment" class="field !py-1.5 text-xs" />
+        <button id="prog-video-save" class="btn btn-ghost btn-sm mt-2">Upload video</button>
+      </div>
       <div id="prog-skills" class="mt-5"></div>
     </div>
   </div>
@@ -140,7 +145,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       from.setDate(from.getDate() - 7); // last week still needs its register
       const { data } = await supabase
         .from('bookings')
-        .select('*, slots(slot_date, start_time, end_time, locations(name)), athletes(id, name)')
+        .select('*, slots(slot_date, start_time, end_time, locations(name)), athletes(id, name, medical_notes, notes)')
         .eq('coach_id', me.id)
         .eq('status', 'booked')
         .gte('slots.slot_date', from.toISOString().slice(0, 10));
@@ -176,8 +181,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
               return `
             <div class="surface-card p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p class="font-display font-semibold">${fmtTime(b.slots.start_time)}–${fmtTime(b.slots.end_time)} — ${esc(b.athletes?.name)}</p>
+                <p class="font-display font-semibold">${fmtTime(b.slots.start_time)}–${fmtTime(b.slots.end_time)} — ${esc(b.athletes?.name)}
+                  ${b.athletes?.medical_notes ? `<span class="pill pill-warn ml-1" title="${esc(b.athletes.medical_notes)}">🚑 medical</span>` : ''}
+                </p>
                 <p class="text-xs text-mist-500 mt-0.5">${esc(b.slots.locations?.name ?? '')}${b.discipline_focus ? ` · ${b.discipline_focus === 'both' ? 'tumble + dance' : b.discipline_focus}` : ''}</p>
+                ${b.athletes?.medical_notes ? `<p class="text-xs text-charge-400 mt-0.5">🚑 ${esc(b.athletes.medical_notes)}</p>` : ''}
                 ${
                   b.attendance
                     ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'} mt-1">${b.attendance === 'present' ? 'Present' : 'Absent'}</span>`
@@ -437,6 +445,33 @@ import AppLayout from '../../layouts/AppLayout.astro';
         })
       );
     }
+
+    document.getElementById('prog-video-save')?.addEventListener('click', async () => {
+      const input = document.getElementById('prog-video') as HTMLInputElement;
+      const file = input.files?.[0];
+      if (!file) return toast('Choose a video first.', 'err');
+      if (file.size > 100 * 1024 * 1024) return toast('Keep clips under 100 MB.', 'err');
+      const btn = document.getElementById('prog-video-save') as HTMLButtonElement;
+      btn.disabled = true;
+      btn.textContent = 'Uploading…';
+      try {
+        const path = `${progAthleteId}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`;
+        const { error: upErr } = await supabase.storage.from('skill-media').upload(path, file);
+        if (upErr) throw upErr;
+        const { error } = await supabase.rpc('add_skill_media', {
+          p_athlete_id: progAthleteId,
+          p_path: path,
+        });
+        if (error) throw error;
+        toast('Video added to their journey! 🎬');
+        input.value = '';
+      } catch (e) {
+        toast(errMsg(e), 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Upload video';
+      }
+    });
 
     document.getElementById('prog-note-save')?.addEventListener('click', async () => {
       const note = (document.getElementById('prog-note') as HTMLTextAreaElement).value.trim();

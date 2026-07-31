@@ -1182,6 +1182,97 @@ to authenticated, service_role;
 -- Future functions shouldn't auto-grant to everyone either.
 alter default privileges in schema public revoke execute on functions from public;
 
+-- ===========================================================================
+-- V3 FEATURES — credits & makeup tokens, rebook nudges, broadcasts,
+-- skill videos (consent-gated), medical flags, public club leads.
+-- The full definitions live in the applied migration
+-- credits_makeups_broadcasts_media_nudges; kept in sync here.
+-- ===========================================================================
+alter table public.athletes add column medical_notes text;
+alter table public.athletes add column media_consent boolean not null default false;
+alter table public.club_settings add column late_cancel_makeup_tokens boolean not null default true;
+
+create table public.credit_ledger (
+  id uuid primary key default gen_random_uuid (),
+  profile_id uuid not null references public.profiles (id) on delete cascade,
+  delta int not null check (delta between -1000 and 1000),
+  reason text not null,
+  booking_id uuid references public.bookings (id) on delete set null,
+  created_by uuid references public.profiles (id),
+  created_at timestamptz not null default now()
+);
+create index credit_ledger_profile_idx on public.credit_ledger (profile_id, created_at desc);
+alter table public.credit_ledger enable row level security;
+create policy credit_ledger_select on public.credit_ledger for select to authenticated
+  using (profile_id = auth.uid() or is_admin());
+
+create table public.broadcasts (
+  id uuid primary key default gen_random_uuid (),
+  sender_id uuid not null references public.profiles (id),
+  audience text not null check (audience in ('everyone', 'parents', 'coaches')),
+  title text not null,
+  body text not null,
+  recipient_count int not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table public.broadcasts enable row level security;
+create policy broadcasts_admin on public.broadcasts for select to authenticated using (is_admin());
+
+create table public.skill_media (
+  id uuid primary key default gen_random_uuid (),
+  athlete_id uuid not null references public.athletes (id) on delete cascade,
+  skill_id int references public.skills (id) on delete set null,
+  uploaded_by uuid not null references public.profiles (id),
+  path text not null,
+  note text,
+  created_at timestamptz not null default now()
+);
+alter table public.skill_media enable row level security;
+create policy skill_media_select on public.skill_media for select to authenticated
+  using (owns_athlete(athlete_id) or is_admin() or (is_coach() and coach_teaches_athlete(athlete_id)));
+create policy skill_media_delete on public.skill_media for delete to authenticated
+  using (uploaded_by = auth.uid() or is_admin());
+
+create table public.club_leads (
+  id uuid primary key default gen_random_uuid (),
+  club_name text not null,
+  contact_name text not null,
+  email text not null,
+  message text,
+  created_at timestamptz not null default now()
+);
+alter table public.club_leads enable row level security;
+create policy club_leads_insert on public.club_leads for insert to anon, authenticated with check (true);
+create policy club_leads_select on public.club_leads for select to authenticated using (is_admin());
+
+-- Functions: admin_adjust_credits, admin_broadcast, broadcast_read_counts,
+-- send_rebook_nudges (daily via pg_cron), add_skill_media, plus book_slot /
+-- cancel_booking updated for credit spend/refund + makeup tokens — see the
+-- migration file of the same name for the full bodies. Storage bucket
+-- 'skill-media' (private) with authenticated read/upload policies.
+
+-- ===========================================================================
+-- OWNER CONSOLE (migrations owner_role_enum + owner_console_clubs_registry)
+-- 'owner' super-role above club admins; clubs registry; owner_create_account.
+-- is_admin() returns true for owners too. Full per-club data isolation is a
+-- planned milestone — clubs currently share this instance.
+-- ===========================================================================
+alter type public.user_role add value if not exists 'owner';
+
+create table public.clubs (
+  id uuid primary key default gen_random_uuid (),
+  name text not null,
+  status text not null default 'lead' check (status in ('lead', 'trial', 'active', 'churned')),
+  contact_name text,
+  contact_email text,
+  notes text,
+  created_at timestamptz not null default now()
+);
+alter table public.clubs enable row level security;
+-- policies + is_owner()/owner_create_account(): see the migration.
+alter table public.club_leads add column status text not null default 'new'
+  check (status in ('new', 'contacted', 'converted', 'closed'));
+
 -- ---------------------------------------------------------------------------
 -- FIRST ADMIN — after you sign up in the app, run this with your email:
 --   update public.profiles set role = 'admin' where email = 'you@example.com';

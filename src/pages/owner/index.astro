@@ -1,0 +1,184 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Owner HQ">
+  <p class="eyebrow">Owner HQ</p>
+  <h1 class="text-2xl mt-1 mb-5">Run the platform</h1>
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../../lib/supabase';
+    import { requireAuth, esc, toast, errMsg } from '../../lib/app';
+
+    const content = document.getElementById('content')!;
+    const statusPill: Record<string, string> = {
+      lead: 'pill', trial: 'pill pill-warn', active: 'pill pill-success', churned: 'pill pill-danger',
+      new: 'pill pill-accent', contacted: 'pill pill-warn', converted: 'pill pill-success', closed: 'pill',
+    };
+
+    async function render() {
+      const [{ data: clubs }, { data: leads }, { count: users }, { count: bookings }] =
+        await Promise.all([
+          supabase.from('clubs').select('*').order('created_at', { ascending: false }),
+          supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(50),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }),
+          supabase.from('bookings').select('*', { count: 'exact', head: true }),
+        ]);
+
+      content.innerHTML = `
+        <div class="grid gap-4 grid-cols-2 sm:grid-cols-4 mb-6">
+          ${[
+            ['Clubs', (clubs ?? []).filter((c) => c.status !== 'lead').length],
+            ['Open leads', (leads ?? []).filter((l) => ['new', 'contacted'].includes(l.status)).length],
+            ['Accounts', users ?? 0],
+            ['Total bookings', bookings ?? 0],
+          ]
+            .map(
+              ([label, n]) => `
+            <div class="surface-card p-5 text-center">
+              <p class="text-3xl font-display font-semibold ignite-text">${n}</p>
+              <p class="text-xs text-mist-400 mt-1">${label}</p>
+            </div>`
+            )
+            .join('')}
+        </div>
+
+        <div class="grid gap-5 lg:grid-cols-2">
+          <div class="surface-card p-5">
+            <h2 class="text-base font-semibold mb-3">📥 Leads (from the website)</h2>
+            ${
+              (leads ?? []).length
+                ? (leads ?? [])
+                    .map(
+                      (l) => `
+                <div class="py-3 border-t border-ink-700 first:border-0">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-sm font-semibold">${esc(l.club_name)}</p>
+                    <span class="${statusPill[l.status] ?? 'pill'}">${l.status}</span>
+                  </div>
+                  <p class="text-xs text-mist-400 mt-0.5">${esc(l.contact_name)} · ${esc(l.email)}</p>
+                  ${l.message ? `<p class="text-xs text-mist-500 mt-1">${esc(l.message)}</p>` : ''}
+                  ${
+                    ['new', 'contacted'].includes(l.status)
+                      ? `<div class="mt-2 flex gap-1.5 flex-wrap">
+                          <button class="btn btn-ghost btn-sm" data-lead-status="contacted" data-lead="${l.id}">Mark contacted</button>
+                          <button class="btn btn-primary btn-sm" data-lead-convert="${l.id}">Convert to club</button>
+                          <button class="btn btn-danger btn-sm" data-lead-status="closed" data-lead="${l.id}">Close</button>
+                        </div>`
+                      : ''
+                  }
+                </div>`
+                    )
+                    .join('')
+                : '<p class="text-sm text-mist-500">No leads yet — they arrive from the Contact page.</p>'
+            }
+          </div>
+
+          <div>
+            <div class="surface-card p-5 mb-5">
+              <h2 class="text-base font-semibold mb-3">🏟️ Clubs</h2>
+              ${(clubs ?? [])
+                .map(
+                  (c) => `
+                <div class="py-3 border-t border-ink-700 first:border-0">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-sm font-semibold">${esc(c.name)}</p>
+                    <select class="field !w-auto !py-1 !text-xs" data-club-status="${c.id}">
+                      ${['lead', 'trial', 'active', 'churned'].map((s) => `<option value="${s}" ${s === c.status ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                  </div>
+                  <p class="text-xs text-mist-400 mt-0.5">${esc(c.contact_name ?? '')}${c.contact_email ? ' · ' + esc(c.contact_email) : ''}</p>
+                  ${c.notes ? `<p class="text-xs text-mist-500 mt-0.5">${esc(c.notes)}</p>` : ''}
+                </div>`
+                )
+                .join('')}
+              <div class="mt-4 pt-3 border-t border-ink-700 flex gap-2">
+                <input class="field flex-1" id="club-new" placeholder="Add a club manually…" />
+                <button class="btn btn-primary btn-sm" id="club-add">Add</button>
+              </div>
+              <p class="text-xs text-mist-500 mt-2">Per-club data isolation is the next milestone — new clubs currently share this instance.</p>
+            </div>
+
+            <div class="surface-card p-5">
+              <h2 class="text-base font-semibold mb-1">➕ Create an account</h2>
+              <p class="text-xs text-mist-500 mb-3">Any role, instantly confirmed. They set their password with "Forgotten password" on first sign-in.</p>
+              <div class="flex flex-col gap-2.5">
+                <input class="field" id="acc-name" placeholder="Full name" />
+                <input class="field" id="acc-email" type="email" placeholder="Email" />
+                <select class="field" id="acc-role">
+                  <option value="parent">Parent</option>
+                  <option value="coach">Coach</option>
+                  <option value="admin">Club admin</option>
+                  <option value="athlete">Adult athlete</option>
+                </select>
+                <button class="btn btn-primary btn-sm" id="acc-create">Create account</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+
+      content.querySelectorAll<HTMLButtonElement>('[data-lead-status]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { error } = await supabase
+            .from('club_leads')
+            .update({ status: b.dataset.leadStatus })
+            .eq('id', b.dataset.lead);
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-lead-convert]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const { data: lead } = await supabase.from('club_leads').select('*').eq('id', b.dataset.leadConvert).single();
+          if (!lead) return;
+          const { error } = await supabase.from('clubs').insert({
+            name: lead.club_name,
+            status: 'trial',
+            contact_name: lead.contact_name,
+            contact_email: lead.email,
+            notes: lead.message,
+          });
+          if (error) return toast(errMsg(error), 'err');
+          await supabase.from('club_leads').update({ status: 'converted' }).eq('id', lead.id);
+          toast(`${lead.club_name} converted to a trial club! 🎉`);
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLSelectElement>('[data-club-status]').forEach((sel) =>
+        sel.addEventListener('change', async () => {
+          const { error } = await supabase.from('clubs').update({ status: sel.value }).eq('id', sel.dataset.clubStatus);
+          if (error) return toast(errMsg(error), 'err');
+          toast('Club updated.');
+        })
+      );
+      document.getElementById('club-add')?.addEventListener('click', async () => {
+        const name = (document.getElementById('club-new') as HTMLInputElement).value.trim();
+        if (!name) return;
+        const { error } = await supabase.from('clubs').insert({ name, status: 'trial' });
+        if (error) return toast(errMsg(error), 'err');
+        render();
+      });
+      document.getElementById('acc-create')?.addEventListener('click', async () => {
+        const name = (document.getElementById('acc-name') as HTMLInputElement).value.trim();
+        const email = (document.getElementById('acc-email') as HTMLInputElement).value.trim();
+        if (!name || !email) return toast('Name and email required.', 'err');
+        const { error } = await supabase.rpc('owner_create_account', {
+          p_email: email,
+          p_full_name: name,
+          p_role: (document.getElementById('acc-role') as HTMLSelectElement).value,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast(`Account created for ${name} — tell them to use "Forgotten password" to set theirs.`);
+        render();
+      });
+    }
+
+    (async () => {
+      await requireAuth(['owner']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

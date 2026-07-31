@@ -104,7 +104,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
     async function render(athleteId: string) {
       currentAthlete = athleteId;
-      const [{ data: skills }, { data: statuses }, { data: notes }] = await Promise.all([
+      const [{ data: skills }, { data: statuses }, { data: notes }, { data: media }] = await Promise.all([
         supabase.from('skills').select('*').order('sort'),
         supabase.from('athlete_skills').select('*').eq('athlete_id', athleteId),
         supabase
@@ -113,6 +113,12 @@ import AppLayout from '../layouts/AppLayout.astro';
           .eq('athlete_id', athleteId)
           .order('created_at', { ascending: false })
           .limit(30),
+        supabase
+          .from('skill_media')
+          .select('*, skills(name)')
+          .eq('athlete_id', athleteId)
+          .order('created_at', { ascending: false })
+          .limit(12),
       ]);
       const statusMap = new Map((statuses ?? []).map((s) => [s.skill_id, s]));
 
@@ -187,6 +193,23 @@ import AppLayout from '../layouts/AppLayout.astro';
       content.innerHTML =
         (disc !== 'dance' ? section('tumble', 'Tumble', '🤸') : '') +
         (disc !== 'tumble' ? section('dance', 'All-star dance', '💃') : '') +
+        ((media ?? []).length
+          ? `<div class="surface-card p-5 mb-5">
+              <h2 class="text-lg mb-3">🎬 Highlight reel</h2>
+              <div class="grid gap-3 sm:grid-cols-2">
+                ${(media ?? [])
+                  .map(
+                    (v) => `
+                  <div>
+                    <video controls preload="metadata" data-media-path="${esc(v.path)}"
+                      class="w-full rounded-lg border border-ink-700 bg-ink-900" style="max-height:16rem"></video>
+                    <p class="text-xs text-mist-500 mt-1">${v.skills?.name ? esc(v.skills.name) + ' · ' : ''}${fmtDateTime(v.created_at)}</p>
+                  </div>`
+                  )
+                  .join('')}
+              </div>
+            </div>`
+          : '') +
         `<div class="surface-card p-5">
           <h2 class="text-lg mb-3">Coach notes</h2>
           ${
@@ -203,6 +226,14 @@ import AppLayout from '../layouts/AppLayout.astro';
               : '<p class="text-sm text-mist-500">No notes yet — they appear after lessons.</p>'
           }
         </div>`;
+
+      // Resolve signed URLs for the highlight reel (private bucket).
+      content.querySelectorAll<HTMLVideoElement>('[data-media-path]').forEach(async (v) => {
+        const { data } = await supabase.storage
+          .from('skill-media')
+          .createSignedUrl(v.dataset.mediaPath!, 3600);
+        if (data?.signedUrl) v.src = data.signedUrl;
+      });
     }
 
     async function trainedDisciplines(athleteId: string): Promise<Set<string>> {

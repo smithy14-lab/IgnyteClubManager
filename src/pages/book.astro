@@ -76,6 +76,7 @@ import AppLayout from '../layouts/AppLayout.astro';
             Books this time every week for as long as the club runs the slot. Cancel any time.
           </p>
         </div>
+        <p id="p-credits" class="hidden text-xs text-ignite-400 font-semibold"></p>
         <p id="p-policy" class="text-xs text-mist-500"></p>
         <button id="p-confirm" class="btn btn-primary">Confirm booking</button>
       </div>
@@ -134,6 +135,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     let slots: Slot[] = [];
     let athletes: Awaited<ReturnType<typeof myAthletes>> = [];
     let policyText = '';
+    let creditBalance = 0;
     let mode: 'book' | 'waitlist' = 'book';
     let activeSlot: Slot | null = null;
     let weekly = false;
@@ -379,6 +381,9 @@ import AppLayout from '../layouts/AppLayout.astro';
       const freq = document.getElementById('p-freq-wrap')!;
       freq.classList.toggle('hidden', m === 'waitlist' || !activeSlot.series_id);
       document.getElementById('p-policy')!.textContent = m === 'book' ? policyText : '';
+      const creditsEl = document.getElementById('p-credits')!;
+      creditsEl.classList.toggle('hidden', m !== 'book' || creditBalance <= 0);
+      creditsEl.textContent = `💳 You have ${creditBalance} lesson credit${creditBalance === 1 ? '' : 's'} — one-off bookings use one automatically.`;
       pConfirm.textContent = m === 'book' ? 'Confirm booking' : 'Join waiting list';
       backdrop.classList.remove('hidden');
     }
@@ -475,6 +480,12 @@ import AppLayout from '../layouts/AppLayout.astro';
       athletes = await myAthletes();
       const { data: settings } = await supabase.from('club_settings').select('cancellation_policy').single();
       policyText = settings?.cancellation_policy ?? '';
+      const { data: session } = await supabase.auth.getSession();
+      const { data: ledger } = await supabase
+        .from('credit_ledger')
+        .select('delta')
+        .eq('profile_id', session.session?.user.id ?? '');
+      creditBalance = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
       renderToggle();
       await load();
       syncView();

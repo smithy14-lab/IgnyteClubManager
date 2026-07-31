@@ -3,67 +3,74 @@ import AppLayout from '../layouts/AppLayout.astro';
 import IgnyteMark from '../components/IgnyteMark.astro';
 
 const features = [
-  {
-    emoji: '⚡',
-    title: 'Book in seconds',
-    body: 'Live calendar of 1-2-1 slots by coach, discipline, time and location — one-offs or weekly until cancelled.',
-  },
-  {
-    emoji: '📈',
-    title: 'Watch skills land',
-    body: 'Every lesson updates a real skill journey — levels, badges and coach notes your family can see grow.',
-  },
-  {
-    emoji: '🔁',
-    title: 'Waiting lists that work',
-    body: 'Cancelled spaces are offered to the next family automatically, with a fair claim window.',
-  },
-  {
-    emoji: '🧾',
-    title: 'Club admin, sorted',
-    body: 'Registers, coach pay export to Excel, locations, cancellation policies — all in one place.',
-  },
+  ['⚡', 'Book in seconds', 'Live calendars of 1-2-1 slots by coach, discipline, time and location. One-offs or weekly until cancelled — parents book at 10pm without a single WhatsApp.'],
+  ['🔥', 'Skill journeys that sell themselves', 'Every lesson updates a visual progression: levels light up, badges land, and families get a "🎉 skill achieved!" the moment it happens. Progress parents can see is progress parents keep paying for.'],
+  ['🔁', 'Waiting lists that fill themselves', 'A cancellation automatically offers the space to the next family with a fair, timed claim window. Late cancellations stay payable — and can grant a makeup token.'],
+  ['💳', 'Lesson credits & makeup tokens', 'Sell lesson packs, let bookings spend credits automatically, and turn late-cancel arguments into makeup tokens families redeem themselves.'],
+  ['🧾', 'Coach pay without spreadsheet shuffle', 'Registers on the coach’s phone, attendance flowing straight into an Excel export with a per-coach pay summary. Rates, late cancels, totals — done.'],
+  ['📣', 'One place to run the club', 'Locations, cancellation policy, broadcasts with read tracking, medical flags, rebooking nudges — the whole club office, installable on any phone.'],
+];
+
+const steps = [
+  ['1', 'Admin opens slots', 'Pick a window — say 12:00 to 2pm, 30-minute slots, four spaces, weekly at your gym.'],
+  ['2', 'Coaches join in', 'Coaches add themselves to the slots they can work, with their disciplines, levels and rate.'],
+  ['3', 'Families book & watch', 'Parents book their coach and discipline in seconds — then watch the skill journey light up after every lesson.'],
 ];
 ---
 
-<AppLayout title="Welcome" chrome={false}>
-  <section class="min-h-[70dvh] flex flex-col items-center justify-center text-center pt-10 animate-rise">
-    <IgnyteMark size={80} />
-    <h1 class="mt-6 text-headline max-w-2xl">
-      Book the lesson.<br /><span class="ignite-text">Watch the skills land.</span>
+<AppLayout title="Private lessons, powered up">
+  <section class="min-h-[72dvh] flex flex-col items-center justify-center text-center pt-8 animate-rise">
+    <IgnyteMark size={84} />
+    <h1 class="mt-6 text-headline max-w-3xl">
+      The club manager where<br /><span class="ignite-text">every lesson lands a skill.</span>
     </h1>
-    <p class="mt-4 max-w-lg text-mist-400">
-      Ignyte Club Manager is the private-lesson platform built for cheer tumble and all-star dance —
-      the only one where every 1-2-1 moves a skill journey forward.
+    <p class="mt-5 max-w-xl text-mist-300 text-lg">
+      Ignyte Club Manager runs 1-2-1 private lessons for cheer &amp; dance clubs — booking,
+      waiting lists, registers and coach pay — wrapped around the thing no other platform has:
+      a skill progression families fall in love with.
     </p>
     <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-      <a href="/login" class="btn btn-primary">Sign in</a>
-      <a href="/signup" class="btn btn-ghost">Create an account</a>
+      <a href="/pricing" class="btn btn-primary">Get it for your club</a>
+      <a href="/login" class="btn btn-ghost">Member sign in</a>
     </div>
-    <p class="mt-8 text-xs text-mist-500">
-      Works offline · Installable from your browser · Free
-    </p>
+    <p class="mt-8 text-xs text-mist-500">Installable from the browser · Works offline · Built for UK clubs</p>
   </section>
 
-  <section class="grid gap-4 sm:grid-cols-2 max-w-3xl mx-auto pb-16 animate-fade">
-    {
-      features.map((f) => (
+  <section class="max-w-4xl mx-auto pb-6">
+    <p class="eyebrow justify-center flex">Why clubs switch</p>
+    <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {features.map(([emoji, title, body]) => (
         <div class="surface-card p-5 text-left">
-          <p class="text-2xl">{f.emoji}</p>
-          <h2 class="mt-2 text-base font-semibold">{f.title}</h2>
-          <p class="mt-1 text-sm text-mist-400">{f.body}</p>
+          <p class="text-2xl">{emoji}</p>
+          <h2 class="mt-2 text-base font-semibold">{title}</h2>
+          <p class="mt-1 text-sm text-mist-400">{body}</p>
         </div>
-      ))
-    }
+      ))}
+    </div>
   </section>
 
-  <script>
-    import { supabase, supabaseConfigured } from '../lib/supabase';
-    // Signed-in visitors land straight on their dashboard.
-    if (supabaseConfigured) {
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session) location.href = '/dashboard';
-      });
-    }
-  </script>
+  <section class="max-w-3xl mx-auto py-12">
+    <p class="eyebrow justify-center flex">How it works</p>
+    <div class="mt-4 grid gap-4 sm:grid-cols-3">
+      {steps.map(([n, title, body]) => (
+        <div class="text-center">
+          <div class="mx-auto w-10 h-10 rounded-full flex items-center justify-center font-display font-bold text-white"
+            style="background: linear-gradient(135deg, var(--color-charge-400), var(--color-ignite-500), var(--color-spark-500))">{n}</div>
+          <h3 class="mt-3 font-semibold text-sm">{title}</h3>
+          <p class="mt-1 text-xs text-mist-400">{body}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="text-center pb-16">
+    <div class="surface-card max-w-xl mx-auto p-8" style="box-shadow: var(--shadow-glow)">
+      <h2 class="text-xl">Ready to ignite your private lessons?</h2>
+      <p class="mt-2 text-sm text-mist-400">Founding clubs get set up free while we're in early access.</p>
+      <div class="mt-5 flex flex-wrap justify-center gap-3">
+        <a href="/contact" class="btn btn-primary">Talk to us</a>
+        <a href="/about" class="btn btn-ghost">Our story</a>
+      </div>
+    </div>
+  </section>
 </AppLayout>

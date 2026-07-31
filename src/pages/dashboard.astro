@@ -69,6 +69,16 @@ import AppLayout from '../layouts/AppLayout.astro';
           )
           .slice(0, 5);
 
+        // Lesson credit balance
+        const { data: ledger } = await supabase
+          .from('credit_ledger')
+          .select('delta')
+          .eq('profile_id', profile.id);
+        const credits = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
+        if (credits > 0) {
+          html += `<div class="mb-4"><span class="pill pill-accent">💳 ${credits} lesson credit${credits === 1 ? '' : 's'} — used automatically when you book</span></div>`;
+        }
+
         // Waiting list offers needing action
         const { data: offers } = athleteIds.length
           ? await supabase

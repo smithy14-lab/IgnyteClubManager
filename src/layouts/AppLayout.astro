@@ -1,9 +1,8 @@
 ---
 /**
- * Shell for every page: brand header, role-aware nav, notification bell,
- * install-app button, offline banner, PWA wiring. Auth state is resolved in
- * the browser (the site is fully static), so nav items are hidden until the
- * signed-in user's role is known.
+ * Shell for every page. Top bar = the public website nav (Home, About,
+ * Pricing, Contact). Signed-in users get a hamburger that slides the app
+ * drawer out from the left (Dashboard, Book, Bookings…), role-filtered.
  */
 import '@fontsource-variable/inter';
 import '@fontsource-variable/space-grotesk';
@@ -12,10 +11,27 @@ import IgnyteMark from '../components/IgnyteMark.astro';
 
 interface Props {
   title: string;
-  /** Public pages (login/signup/landing) hide the app nav entirely. */
+  /** Bare pages (login/signup/offline) hide the nav chrome. */
   chrome?: boolean;
 }
 const { title, chrome = true } = Astro.props;
+
+const siteNav = [
+  ['Home', '/'],
+  ['About', '/about'],
+  ['Pricing', '/pricing'],
+  ['Contact', '/contact'],
+];
+const appNav: [string, string, string][] = [
+  ['🏠 Dashboard', '/dashboard', 'parent,athlete,coach,admin,owner'],
+  ['⚡ Book a lesson', '/book', 'parent,athlete'],
+  ['📅 My bookings', '/bookings', 'parent,athlete'],
+  ['🧒 Athletes', '/athletes', 'parent'],
+  ['🔥 Skill journey', '/progress', 'parent,athlete'],
+  ['📣 Coaching hub', '/coach', 'coach'],
+  ['🛠️ Club admin', '/admin', 'admin,owner'],
+  ['👑 Owner HQ', '/owner', 'owner'],
+];
 ---
 
 <!doctype html>
@@ -24,7 +40,7 @@ const { title, chrome = true } = Astro.props;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>{title} · Ignyte Club Manager</title>
-    <meta name="description" content="Private lesson booking & skill progression for cheer tumble and all-star dance." />
+    <meta name="description" content="Private lesson booking & skill progression for cheer tumble and all-star dance clubs." />
     <meta name="theme-color" content="#07070b" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -32,7 +48,6 @@ const { title, chrome = true } = Astro.props;
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="robots" content="noindex" />
   </head>
   <body>
     <!-- Shared flame gradient used by every IgnyteMark on the page -->
@@ -56,40 +71,44 @@ const { title, chrome = true } = Astro.props;
     {
       chrome && (
         <header class="sticky top-0 z-40 border-b border-ink-700 bg-ink-950/85 backdrop-blur-md">
-          <div class="container-app flex h-16 items-center gap-3">
-            <a href="/dashboard" class="flex items-center gap-2 shrink-0">
+          <div class="container-app flex h-16 items-center gap-2">
+            <button
+              id="drawer-btn"
+              class="hidden rounded-lg border border-ink-600 p-2 text-mist-300 hover:text-ignite-400 hover:border-ignite-500"
+              aria-label="Open app menu"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M3 6h18M3 12h18M3 18h18" />
+              </svg>
+            </button>
+            <a href="/" class="flex items-center gap-2 shrink-0">
               <IgnyteMark size={26} />
               <span class="font-display font-semibold tracking-tight text-mist-100">
                 Ignyte <span class="text-mist-400 font-normal hidden sm:inline">Club Manager</span>
               </span>
             </a>
 
-            <nav id="app-nav" class="ml-auto flex items-center gap-1 text-sm overflow-x-auto">
-              <a data-roles="parent,athlete,coach,admin" href="/dashboard" class="nav-link hidden">Home</a>
-              <a data-roles="parent,athlete" href="/book" class="nav-link hidden">Book</a>
-              <a data-roles="parent,athlete" href="/bookings" class="nav-link hidden">Bookings</a>
-              <a data-roles="parent" href="/athletes" class="nav-link hidden">Athletes</a>
-              <a data-roles="parent,athlete" href="/progress" class="nav-link hidden">Progress</a>
-              <a data-roles="coach" href="/coach" class="nav-link hidden">Coaching</a>
-              <a data-roles="admin" href="/admin" class="nav-link hidden">Admin</a>
+            <nav class="ml-auto hidden md:flex items-center gap-1 text-sm">
+              {siteNav.map(([label, href]) => (
+                <a href={href} class="nav-link">{label}</a>
+              ))}
             </nav>
 
-            <button
-              id="notif-btn"
-              class="relative hidden rounded-full border border-ink-600 p-2 text-mist-300 hover:text-ignite-400 hover:border-ignite-500 transition-colors"
-              aria-label="Notifications"
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-              </svg>
-              <span
-                id="notif-dot"
-                class="hidden absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ignite-500 ring-2 ring-ink-950"
-              />
-            </button>
-
-            <button id="signout-btn" class="hidden btn btn-ghost btn-sm">Sign out</button>
+            <div class="flex items-center gap-2 ml-auto md:ml-3">
+              <a id="signin-link" href="/login" class="btn btn-primary btn-sm hidden">Sign in</a>
+              <a id="openapp-link" href="/dashboard" class="btn btn-primary btn-sm hidden">Open app</a>
+              <button
+                id="notif-btn"
+                class="relative hidden rounded-full border border-ink-600 p-2 text-mist-300 hover:text-ignite-400 hover:border-ignite-500 transition-colors"
+                aria-label="Notifications"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                  <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+                </svg>
+                <span id="notif-dot" class="hidden absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ignite-500 ring-2 ring-ink-950" />
+              </button>
+            </div>
           </div>
 
           <div
@@ -100,6 +119,26 @@ const { title, chrome = true } = Astro.props;
             <div id="notif-list" class="flex flex-col" />
           </div>
         </header>
+
+        <div id="drawer-backdrop" class="hidden fixed inset-0 bg-black/60 z-40" />
+        <aside
+          id="app-drawer"
+          class="fixed left-0 top-0 z-50 h-dvh w-72 -translate-x-full transition-transform duration-300 border-r border-ink-700 bg-ink-900 p-4 flex flex-col gap-1"
+          style="transition-timing-function: var(--ease-spring)"
+        >
+          <div class="flex items-center gap-2 px-2 pb-4 border-b border-ink-700 mb-2">
+            <IgnyteMark size={24} />
+            <span class="font-display font-semibold">Your club</span>
+            <button id="drawer-close" class="ml-auto btn btn-ghost btn-sm">✕</button>
+          </div>
+          {appNav.map(([label, href, roles]) => (
+            <a data-roles={roles} href={href} class="drawer-link hidden">{label}</a>
+          ))}
+          <div class="mt-auto pt-4 border-t border-ink-700 flex flex-col gap-2">
+            <button id="drawer-install" class="btn btn-ghost btn-sm hidden">📲 Install the app</button>
+            <button id="signout-btn" class="btn btn-ghost btn-sm">Sign out</button>
+          </div>
+        </aside>
       )
     }
 
@@ -133,6 +172,21 @@ const { title, chrome = true } = Astro.props;
         color: var(--color-ignite-400);
         background: var(--color-ink-800);
       }
+      .drawer-link {
+        display: block;
+        padding: 0.65rem 0.8rem;
+        border-radius: 0.6rem;
+        font-size: 0.92rem;
+        font-weight: 500;
+        color: var(--color-mist-200);
+      }
+      .drawer-link:hover {
+        background: var(--color-ink-800);
+        color: var(--color-ignite-400);
+      }
+      #app-drawer.open {
+        transform: translateX(0);
+      }
     </style>
 
     <script>
@@ -151,10 +205,11 @@ const { title, chrome = true } = Astro.props;
         addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
       }
 
-      // ------- install prompt (Chromium) + iOS hint -------
+      // ------- install prompt -------
       let deferredPrompt: Event | null = null;
       const hint = document.getElementById('install-hint');
       const installBtn = document.getElementById('install-btn');
+      const drawerInstall = document.getElementById('drawer-install');
       const dismissed = () => localStorage.getItem('ignyte-install-dismissed') === '1';
       const standalone =
         matchMedia('(display-mode: standalone)').matches ||
@@ -163,50 +218,64 @@ const { title, chrome = true } = Astro.props;
       addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();
         deferredPrompt = e;
+        drawerInstall?.classList.remove('hidden');
         if (!dismissed() && !standalone) hint?.classList.remove('hidden');
       });
-      installBtn?.addEventListener('click', async () => {
+      const doInstall = () => {
         hint?.classList.add('hidden');
-        const p = deferredPrompt as unknown as { prompt: () => void } | null;
-        p?.prompt();
-      });
+        (deferredPrompt as unknown as { prompt: () => void } | null)?.prompt();
+      };
+      installBtn?.addEventListener('click', doInstall);
+      drawerInstall?.addEventListener('click', doInstall);
       document.getElementById('install-dismiss')?.addEventListener('click', () => {
         localStorage.setItem('ignyte-install-dismissed', '1');
         hint?.classList.add('hidden');
       });
-      // iOS Safari has no beforeinstallprompt — show a one-time hint instead.
       const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
       if (isIos && !standalone && !dismissed()) {
         setTimeout(() => {
           const body = hint?.querySelector('p.text-xs');
-          if (body)
-            body.textContent = 'Tap the Share button in Safari, then "Add to Home Screen".';
+          if (body) body.textContent = 'Tap the Share button in Safari, then "Add to Home Screen".';
           installBtn?.classList.add('hidden');
           hint?.classList.remove('hidden');
         }, 2500);
       }
 
-      // ------- auth-aware nav + notifications -------
-      const nav = document.getElementById('app-nav');
-      if (nav && supabaseConfigured) {
+      // ------- drawer -------
+      const drawer = document.getElementById('app-drawer');
+      const backdrop = document.getElementById('drawer-backdrop');
+      const setDrawer = (open: boolean) => {
+        drawer?.classList.toggle('open', open);
+        backdrop?.classList.toggle('hidden', !open);
+      };
+      document.getElementById('drawer-btn')?.addEventListener('click', () => setDrawer(true));
+      document.getElementById('drawer-close')?.addEventListener('click', () => setDrawer(false));
+      backdrop?.addEventListener('click', () => setDrawer(false));
+
+      // ------- auth-aware chrome + notifications -------
+      if (document.getElementById('drawer-btn') && supabaseConfigured) {
         (async () => {
           const { data } = await supabase.auth.getSession();
-          if (!data.session) return;
+          if (!data.session) {
+            document.getElementById('signin-link')?.classList.remove('hidden');
+            return;
+          }
           const { data: profile } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', data.session.user.id)
             .single();
           const role = profile?.role ?? 'parent';
-          nav.querySelectorAll<HTMLElement>('[data-roles]').forEach((el) => {
+          document.getElementById('drawer-btn')?.classList.remove('hidden');
+          document.getElementById('openapp-link')?.classList.remove('hidden');
+          document.getElementById('notif-btn')?.classList.remove('hidden');
+          drawer?.querySelectorAll<HTMLElement>('[data-roles]').forEach((el) => {
             if ((el.dataset.roles ?? '').split(',').includes(role)) el.classList.remove('hidden');
           });
-          document.getElementById('signout-btn')?.classList.remove('hidden');
-          document.getElementById('notif-btn')?.classList.remove('hidden');
 
           document.getElementById('signout-btn')?.addEventListener('click', async () => {
             await supabase.auth.signOut();
-            location.href = '/login';
+            location.href = '/';
           });
 
           // Notifications
