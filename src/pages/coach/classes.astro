@@ -1,0 +1,107 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Class registers">
+  <p class="eyebrow">Coaching</p>
+  <div class="flex items-center justify-between gap-2 mt-1 mb-5">
+    <h1 class="text-2xl">Class registers</h1>
+    <a href="/coach" class="btn btn-ghost btn-sm">← Coaching hub</a>
+  </div>
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../../lib/supabase';
+    import { requireAuth, esc, toast, errMsg, ageFromDob, fmtDate, type AuthCtx } from '../../lib/app';
+
+    const content = document.getElementById('content')!;
+    let ctx: AuthCtx;
+    const hm = (t: string) => t.slice(0, 5);
+
+    async function openRegister(sessionId: string, host: HTMLElement) {
+      const { data, error } = await supabase.rpc('get_class_register', { p_session: sessionId });
+      if (error) return toast(errMsg(error), 'err');
+      const roster = (data?.roster ?? []) as { athlete_id: string; name: string; dob: string; medical: boolean; trial: boolean; attendance: string | null }[];
+      const done = roster.filter((r) => r.attendance).length;
+      host.innerHTML = `
+        <p class="text-xs text-mist-400 mb-2 mt-3">${done}/${roster.length} marked</p>
+        ${roster
+          .map(
+            (r) => `
+          <div class="py-2 border-t border-ink-700 first:border-0 flex flex-wrap items-center justify-between gap-2">
+            <p class="text-sm">${esc(r.name)} <span class="text-xs text-mist-500">(${ageFromDob(r.dob)})</span>
+              ${r.trial ? '<span class="pill pill-accent">⭐ trial</span>' : ''}
+              ${r.medical ? '<span class="pill pill-warn" title="Medical notes — see athlete profile">🚑</span>' : ''}</p>
+            <div class="flex gap-1.5">
+              <button class="btn btn-sm ${r.attendance === 'present' ? 'btn-primary' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:present">Present</button>
+              <button class="btn btn-sm ${r.attendance === 'absent' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:absent">Absent</button>
+            </div>
+          </div>`
+          )
+          .join('') || '<p class="text-sm text-mist-500">Nobody on this session yet.</p>'}`;
+      host.querySelectorAll<HTMLButtonElement>('[data-mark]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [sid, aid, status] = b.dataset.mark!.split(':');
+          const { error: e } = await supabase.rpc('take_class_register', { p_session: sid, p_athlete: aid, p_status: status });
+          if (e) return toast(errMsg(e), 'err');
+          openRegister(sid, host);
+        })
+      );
+    }
+
+    async function render() {
+      const club = ctx.club!;
+      const today = new Date();
+      const from = new Date(today.getTime() - 3 * 864e5).toISOString().slice(0, 10);
+      const to = new Date(today.getTime() + 7 * 864e5).toISOString().slice(0, 10);
+      const { data: sess, error } = await supabase
+        .from('class_sessions')
+        .select('id, session_date, start_time, end_time, cancelled, class_groups(name, lead_coach_id, capacity)')
+        .eq('club_id', club.id)
+        .gte('session_date', from)
+        .lte('session_date', to)
+        .order('session_date')
+        .order('start_time');
+      if (error) return toast(errMsg(error), 'err');
+      const rows = (sess ?? []).filter((s) => !s.cancelled);
+      if (!rows.length) {
+        content.innerHTML = '<div class="surface-card p-5"><p class="text-sm text-mist-500">No class sessions in the next week. Group classes are set up under Admin → Classes.</p></div>';
+        return;
+      }
+      const todayStr = today.toISOString().slice(0, 10);
+      content.innerHTML = rows
+        .map((s) => {
+          const g = s.class_groups as unknown as { name: string; lead_coach_id: string | null };
+          const isMine = g?.lead_coach_id === ctx.profile.id;
+          const isToday = s.session_date === todayStr;
+          return `
+        <div class="surface-card p-5 mb-4 ${isToday ? 'border-ignite-500/50' : ''}" data-card="${s.id}">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 class="font-semibold">${esc(g?.name ?? 'Class')} ${isMine ? '<span class="pill pill-accent">yours</span>' : ''} ${isToday ? '<span class="pill pill-success">today</span>' : ''}</h2>
+              <p class="text-xs text-mist-400 mt-0.5">${fmtDate(s.session_date)} · ${hm(s.start_time)}–${hm(s.end_time)}</p>
+            </div>
+            <button class="btn btn-primary btn-sm" data-open="${s.id}">Register</button>
+          </div>
+          <div class="reg-panel hidden" data-regpanel="${s.id}"></div>
+        </div>`;
+        })
+        .join('');
+      content.querySelectorAll<HTMLButtonElement>('[data-open]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const panel = content.querySelector<HTMLElement>(`[data-regpanel="${b.dataset.open}"]`)!;
+          if (!panel.classList.contains('hidden')) return panel.classList.add('hidden');
+          panel.classList.remove('hidden');
+          openRegister(b.dataset.open!, panel);
+        })
+      );
+    }
+
+    (async () => {
+      ctx = await requireAuth(['coach', 'admin']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

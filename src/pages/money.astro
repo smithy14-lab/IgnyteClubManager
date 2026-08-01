@@ -1,0 +1,182 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Money">
+  <p class="eyebrow">Money</p>
+  <h1 class="text-2xl mt-1 mb-5">Payments &amp; credits</h1>
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requireAuth, myAthletes, esc, toast, errMsg, fmtDate, type AuthCtx } from '../lib/app';
+
+    const content = document.getElementById('content')!;
+    let ctx: AuthCtx;
+
+    const pill: Record<string, string> = {
+      due: 'pill pill-warn', overdue: 'pill pill-danger', paid: 'pill pill-success', void: 'pill',
+      active: 'pill pill-success', cancelled: 'pill', paused: 'pill pill-warn',
+    };
+
+    async function render() {
+      const club = ctx.club!;
+      const me = ctx.profile.id;
+      const [{ data: settings }, { data: invoices }, { data: ledger }, { data: mems }, { data: plans }, athletes] =
+        await Promise.all([
+          supabase.from('club_settings').select('currency, payment_instructions, payment_link_url').eq('club_id', club.id).single(),
+          supabase.from('invoices').select('*').eq('club_id', club.id).eq('profile_id', me).order('created_at', { ascending: false }).limit(60),
+          supabase.from('credit_ledger').select('delta').eq('club_id', club.id).eq('profile_id', me),
+          supabase.from('memberships').select('id, status, started_on, athlete_id, payer_id, athletes(name), membership_plans(name, monthly_fee, classes_per_week, private_credits_per_month)').eq('club_id', club.id),
+          supabase.from('membership_plans').select('*').eq('club_id', club.id).eq('active', true).order('monthly_fee'),
+          myAthletes(club.id),
+        ]);
+
+      const sym = settings?.currency ?? '£';
+      const money = (n: unknown) => sym + Number(n).toFixed(2);
+      const credits = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
+      const open = (invoices ?? []).filter((i) => ['due', 'overdue'].includes(i.status));
+      const history = (invoices ?? []).filter((i) => !['due', 'overdue'].includes(i.status));
+      const owed = open.reduce((s, i) => s + Number(i.amount), 0);
+      const mine = athletes.filter((a) => a.enrolled);
+      const activeMems = (mems ?? []).filter((m) => m.status === 'active');
+
+      content.innerHTML = `
+        <div class="grid gap-4 grid-cols-2 sm:grid-cols-3 mb-6">
+          <div class="surface-card p-5 text-center">
+            <p class="text-3xl font-display font-semibold ${owed ? 'text-charge-400' : 'ignite-text'}">${money(owed)}</p>
+            <p class="text-xs text-mist-400 mt-1">to pay${open.some((i) => i.status === 'overdue') ? ' · <span class="text-charge-400">overdue!</span>' : ''}</p>
+          </div>
+          <div class="surface-card p-5 text-center">
+            <p class="text-3xl font-display font-semibold ignite-text">${credits}</p>
+            <p class="text-xs text-mist-400 mt-1">lesson credits</p>
+          </div>
+          <div class="surface-card p-5 text-center col-span-2 sm:col-span-1">
+            <p class="text-3xl font-display font-semibold ignite-text">${activeMems.length}</p>
+            <p class="text-xs text-mist-400 mt-1">active membership${activeMems.length === 1 ? '' : 's'}</p>
+          </div>
+        </div>
+
+        ${
+          open.length
+            ? `<div class="surface-card p-5 mb-5">
+          <h2 class="text-base font-semibold mb-1">💳 To pay</h2>
+          <p class="text-xs text-mist-500 mb-3">You pay the club directly — nothing is charged through this app.</p>
+          ${open
+            .map(
+              (i) => `
+            <div class="py-3 border-t border-ink-700 first:border-0 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="text-sm">${esc(i.description)}</p>
+                <p class="text-xs text-mist-500 mt-0.5">due ${fmtDate(i.due_date)}</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="${pill[i.status]}">${i.status}</span>
+                <span class="text-sm font-semibold">${money(i.amount)}</span>
+              </div>
+            </div>`
+            )
+            .join('')}
+          <div class="mt-4 pt-3 border-t border-ink-700">
+            ${settings?.payment_link_url ? `<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="${esc(settings.payment_link_url)}">Pay online ↗</a>` : ''}
+            ${settings?.payment_instructions ? `<p class="text-xs text-mist-300 mt-3 whitespace-pre-line">${esc(settings.payment_instructions)}</p>` : ''}
+            ${!settings?.payment_link_url && !settings?.payment_instructions ? '<p class="text-xs text-mist-500">Ask the club how they take payment — bank transfer or cash at the desk.</p>' : ''}
+          </div>
+        </div>`
+            : '<div class="surface-card p-5 mb-5"><p class="text-sm text-mist-300">✅ Nothing to pay — you\'re all square.</p></div>'
+        }
+
+        <div class="surface-card p-5 mb-5">
+          <h2 class="text-base font-semibold mb-3">🏅 Memberships</h2>
+          ${
+            (mems ?? []).length
+              ? (mems ?? [])
+                  .map((m) => {
+                    const plan = m.membership_plans as unknown as { name: string; monthly_fee: number; classes_per_week: number | null; private_credits_per_month: number };
+                    const ath = m.athletes as unknown as { name: string };
+                    return `
+              <div class="py-3 border-t border-ink-700 first:border-0 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p class="text-sm font-semibold">${esc(ath?.name ?? '')} · ${esc(plan?.name ?? '')}</p>
+                  <p class="text-xs text-mist-400 mt-0.5">${money(plan?.monthly_fee ?? 0)}/month · ${plan?.classes_per_week ? plan.classes_per_week + ' class/wk' : 'unlimited classes'}${plan?.private_credits_per_month ? ' · ' + plan.private_credits_per_month + ' private credits/mo' : ''}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="${pill[m.status] ?? 'pill'}">${m.status}</span>
+                  ${m.status === 'active' && m.payer_id === me ? `<button class="btn btn-ghost btn-sm" data-cancelmem="${m.id}">Cancel</button>` : ''}
+                </div>
+              </div>`;
+                  })
+                  .join('')
+              : '<p class="text-sm text-mist-500">No memberships yet.</p>'
+          }
+          ${
+            (plans ?? []).length && mine.length
+              ? `<div class="mt-4 pt-3 border-t border-ink-700">
+            <p class="text-xs font-semibold text-mist-300 mb-2">Start a membership</p>
+            <div class="flex flex-wrap gap-2 items-center">
+              <select id="mem-plan" class="field !w-auto !py-1.5 !text-xs">
+                ${(plans ?? []).map((p) => `<option value="${p.id}">${esc(p.name)} — ${money(p.monthly_fee)}/mo</option>`).join('')}
+              </select>
+              <select id="mem-ath" class="field !w-auto !py-1.5 !text-xs">
+                ${mine.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+              </select>
+              <button id="mem-start" class="btn btn-primary btn-sm">Start</button>
+            </div>
+            <p class="text-xs text-mist-500 mt-2">The first month's invoice lands here the moment you start.</p>
+          </div>`
+              : ''
+          }
+        </div>
+
+        ${
+          history.length
+            ? `<div class="surface-card p-5">
+          <h2 class="text-base font-semibold mb-3">🧾 History</h2>
+          ${history
+            .slice(0, 25)
+            .map(
+              (i) => `
+            <div class="py-2.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+              <div>
+                <p class="text-sm">${esc(i.description)}</p>
+                <p class="text-xs text-mist-500 mt-0.5">${i.paid_at ? 'paid ' + fmtDate(i.paid_at) + (i.paid_method ? ' · ' + i.paid_method.replace('_', ' ') : '') : fmtDate(i.created_at)}</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="${pill[i.status]}">${i.status}</span>
+                <span class="text-sm">${money(i.amount)}</span>
+              </div>
+            </div>`
+            )
+            .join('')}
+        </div>`
+            : ''
+        }`;
+
+      document.getElementById('mem-start')?.addEventListener('click', async () => {
+        const plan = (document.getElementById('mem-plan') as HTMLSelectElement).value;
+        const ath = (document.getElementById('mem-ath') as HTMLSelectElement).value;
+        if (!confirm('Start this membership? The monthly invoice is raised on the 1st — cancel any time.')) return;
+        const { error } = await supabase.rpc('start_membership', { p_plan: plan, p_athlete: ath });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Membership started 🎉');
+        render();
+      });
+      content.querySelectorAll<HTMLButtonElement>('[data-cancelmem]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Cancel this membership? It ends with the current paid month.')) return;
+          const { error } = await supabase.rpc('cancel_membership', { p_membership: b.dataset.cancelmem });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Membership cancelled.');
+          render();
+        })
+      );
+    }
+
+    (async () => {
+      ctx = await requireAuth('any');
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

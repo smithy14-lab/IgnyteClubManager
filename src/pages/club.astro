@@ -38,7 +38,11 @@ import AppLayout from '../layouts/AppLayout.astro';
         name: string; slug: string; blurb: string | null; accent_color: string | null;
         coaches: { name: string; disciplines: string[] | null; levels: string | null }[];
         upcoming_slots: number; locations: string[];
+        classes?: { name: string; discipline: string; day_of_week: number; start_time: string; end_time: string;
+          age_min: number | null; age_max: number | null; monthly_fee: number | null;
+          price_per_session: number | null; trial_allowed: boolean }[];
       };
+      const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       if (c.accent_color) {
         document.documentElement.style.setProperty('--color-ignite-500', c.accent_color);
         document.documentElement.style.setProperty('--color-ignite-400', c.accent_color);
@@ -61,6 +65,24 @@ import AppLayout from '../layouts/AppLayout.astro';
           <p class="text-sm font-semibold">⚡ Book 1-2-1 private lessons online</p>
           <p class="text-xs text-mist-500 mt-1">${c.upcoming_slots} slot${c.upcoming_slots === 1 ? '' : 's'} open in the next two weeks.</p>
         </div>
+
+        ${
+          (c.classes ?? []).length
+            ? `<div class="surface-card p-5 mt-4">
+                <p class="text-sm font-semibold mb-2">🤸 Weekly classes</p>
+                ${(c.classes ?? [])
+                  .map(
+                    (g) => `<div class="py-1.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+                      <p class="text-sm">${esc(g.name)}
+                        <span class="text-xs text-mist-500">· ${DAYS[g.day_of_week]}s ${g.start_time.slice(0, 5)}–${g.end_time.slice(0, 5)}${g.age_min != null || g.age_max != null ? ` · ages ${g.age_min ?? 0}–${g.age_max ?? '99+'}` : ''}</span></p>
+                      ${g.trial_allowed ? '<span class="pill pill-accent">trials open</span>' : ''}
+                    </div>`
+                  )
+                  .join('')}
+                <p class="text-xs text-mist-500 mt-2">Join below to enrol or book a trial.</p>
+              </div>`
+            : ''
+        }
 
         ${
           c.coaches.length
