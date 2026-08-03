@@ -5,31 +5,43 @@ const tiers = [
   {
     name: 'Free',
     price: '£0',
-    sub: 'everything a small club needs to run privates',
+    sub: 'the basics, to get you off the spreadsheet',
     highlight: false,
     features: [
-      'Unlimited coaches, families & athletes',
-      '1-2-1 booking, waiting lists & weekly slots',
-      'Group classes, trials & class waiting lists',
-      'Invoicing, memberships & auto payment chasing — 0% fees',
-      'Skill journeys, badges & milestone alerts',
-      'Registers + Excel money & coach-pay exports',
-      'Credits & makeup tokens',
+      '1-2-1 booking, weekly slots & waiting lists',
+      'Registers on the coach’s phone',
       'Your own club page & join code',
+      'Up to 40 athletes',
     ],
     cta: ['Start free — set up in minutes', '/start'],
   },
   {
+    name: 'Privates',
+    price: '£15/mo',
+    sub: 'everything for a private-lesson club — nothing you don’t need',
+    highlight: false,
+    features: [
+      'Everything in Free, unlimited athletes',
+      'Skill journeys, badges & videos families love',
+      'Invoicing & online payments — card, Direct Debit, 0% fees',
+      'Late fees & automatic payment chasing',
+      'Credits, packs & makeup tokens',
+      'Broadcasts + Excel money & coach-pay exports',
+    ],
+    cta: ['Start free, upgrade when ready', '/start'],
+  },
+  {
     name: 'Club',
     price: '£29/mo',
-    sub: 'for clubs that want their own look and priority help',
+    sub: 'the full club manager — classes, memberships, your brand',
     highlight: true,
     features: [
-      'Everything in Free',
+      'Everything in Privates',
+      'Group classes, taster trials & class waiting lists',
+      'Monthly memberships billed on your chosen day',
       'Your branding — colours & logo everywhere',
-      'Email notifications for families',
-      'Priority support',
-      'Early access to new features',
+      'Coach & family migration from your old system',
+      'Priority support & early access',
     ],
     cta: ['Start free, upgrade any time', '/start'],
   },
@@ -44,7 +56,7 @@ const tiers = [
       No per-member fees. No card machine contracts. One flat price a single private lesson
       pays for.
     </p>
-    <div class="mt-8 grid gap-5 sm:grid-cols-2 text-left">
+    <div class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 text-left">
       {tiers.map((t) => (
         <div class={`surface-card p-6 ${t.highlight ? 'border-ignite-500/50' : ''}`} style={t.highlight ? 'box-shadow: var(--shadow-glow)' : ''}>
           {t.highlight && <span class="pill pill-accent mb-3">Early access — now</span>}

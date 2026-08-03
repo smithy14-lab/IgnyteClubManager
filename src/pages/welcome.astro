@@ -1,0 +1,63 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import IgnyteMark from '../components/IgnyteMark.astro';
+---
+
+<AppLayout title="Welcome" chrome={false}>
+  <section class="min-h-[80dvh] flex items-center justify-center">
+    <div class="surface-card p-8 w-full max-w-sm text-center animate-rise">
+      <div class="flex justify-center"><IgnyteMark size={56} /></div>
+      <h1 class="text-xl mt-4">Welcome to the club! 🎉</h1>
+      <p class="text-sm text-mist-400 mt-2" id="intro">
+        Your club has set everything up — just choose a password and you're in.
+      </p>
+      <form id="pw-form" class="mt-5 flex flex-col gap-3 text-left hidden">
+        <div>
+          <label class="form-label" for="pw">Choose a password</label>
+          <input class="field" id="pw" type="password" minlength="8" autocomplete="new-password" required />
+        </div>
+        <div>
+          <label class="form-label" for="pw2">And again</label>
+          <input class="field" id="pw2" type="password" minlength="8" autocomplete="new-password" required />
+        </div>
+        <button class="btn btn-primary w-full" type="submit">Set password &amp; open the app</button>
+      </form>
+      <div id="expired" class="hidden mt-5">
+        <p class="text-sm text-charge-400">This invite link has expired or was already used.</p>
+        <a href="/login" class="btn btn-ghost btn-sm mt-3">Sign in instead</a>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { toast, errMsg } from '../lib/app';
+
+    const form = document.getElementById('pw-form') as HTMLFormElement;
+    const expired = document.getElementById('expired')!;
+
+    (async () => {
+      // the invite link signs the user in via the URL hash; give it a moment
+      let session = (await supabase.auth.getSession()).data.session;
+      if (!session) {
+        await new Promise((r) => setTimeout(r, 800));
+        session = (await supabase.auth.getSession()).data.session;
+      }
+      if (!session) {
+        expired.classList.remove('hidden');
+        return;
+      }
+      form.classList.remove('hidden');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const pw = (document.getElementById('pw') as HTMLInputElement).value;
+        const pw2 = (document.getElementById('pw2') as HTMLInputElement).value;
+        if (pw !== pw2) return toast("Those passwords don't match.", 'err');
+        const { error } = await supabase.auth.updateUser({ password: pw });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Password set — welcome aboard! 🔥');
+        location.href = '/dashboard';
+      });
+    })();
+  </script>
+</AppLayout>

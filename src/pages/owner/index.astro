@@ -70,7 +70,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
                 <div class="flex gap-1.5 items-center flex-wrap">
                   <span class="${statusPill[c.status] ?? 'pill'}">${c.status}</span>
                   <select class="field !w-auto !py-1 !text-xs" data-plan="${c.id}">
-                    ${['free', 'club', 'comped'].map((pl) => `<option value="${pl}" ${pl === c.plan ? 'selected' : ''}>${pl}</option>`).join('')}
+                    ${['free', 'privates', 'club', 'comped'].map((pl) => `<option value="${pl}" ${pl === c.plan ? 'selected' : ''}>${pl}</option>`).join('')}
                   </select>
                   <select class="field !w-auto !py-1 !text-xs" data-status="${c.id}">
                     ${['active', 'suspended', 'churned'].map((st) => `<option value="${st}" ${st === c.status ? 'selected' : ''}>${st}</option>`).join('')}

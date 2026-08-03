@@ -1,0 +1,177 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Import · Admin">
+  <p class="eyebrow">Club admin</p>
+  <div class="flex items-center justify-between gap-2 mt-1 mb-1">
+    <h1 class="text-2xl">Bring your club over</h1>
+    <a href="/admin" class="btn btn-ghost btn-sm">← Admin</a>
+  </div>
+  <p class="text-sm text-mist-400 mb-5 max-w-2xl">
+    Moving from another system? Set up your coaches first — they get an email to choose a
+    password. Then add each family with their athletes and their existing weekly session:
+    their lessons are pre-booked before they've even logged in, and their email just asks
+    them to pick a password.
+  </p>
+
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../../lib/supabase';
+    import { requireAuth, esc, toast, errMsg, fmtDate, fmtTime, type AuthCtx } from '../../lib/app';
+
+    const content = document.getElementById('content')!;
+    let ctx: AuthCtx;
+
+    async function importApi(body: Record<string, unknown>): Promise<{ ok?: boolean; invited?: boolean; booked?: number; athletes?: number; error?: string }> {
+      const { data: s } = await supabase.auth.getSession();
+      const res = await fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/admin-import`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${s.session?.access_token ?? ''}`,
+          apikey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify(body),
+      });
+      return res.json().catch(() => ({ error: 'Import service unreachable — is the admin-import function deployed?' }));
+    }
+
+    let athleteRows = 1;
+
+    async function render() {
+      const club = ctx.club!;
+      const [{ data: members }, { data: settings }, { data: slots }] = await Promise.all([
+        supabase.from('club_members').select('profile_id, role, profiles(full_name)').eq('club_id', club.id).eq('status', 'active').in('role', ['coach', 'admin']),
+        supabase.from('club_settings').select('disciplines').eq('club_id', club.id).single(),
+        supabase.from('slots').select('id, slot_date, start_time, series_id, slot_coaches(coach_id)').eq('club_id', club.id).gte('slot_date', new Date().toISOString().slice(0, 10)).order('slot_date').order('start_time').limit(200),
+      ]);
+      const coaches = (members ?? []).map((m) => ({ id: m.profile_id, name: (m.profiles as unknown as { full_name: string })?.full_name ?? '?' }));
+      const disciplines: string[] = settings?.disciplines ?? ['tumble', 'dance'];
+
+      content.innerHTML = `
+        <div class="grid gap-5 lg:grid-cols-2 items-start">
+          <div class="surface-card p-5">
+            <h2 class="text-base font-semibold mb-1">1 · Add a coach</h2>
+            <p class="text-xs text-mist-500 mb-3">They get an email to choose a password, then add themselves to slots. Already on Ignyte? They're attached instantly, no email.</p>
+            <div class="grid gap-2">
+              <input class="field" id="c-name" placeholder="Coach name" />
+              <input class="field" id="c-email" type="email" placeholder="coach@email.com" />
+              <div class="flex flex-wrap gap-3 items-center">
+                ${disciplines.map((d) => `<label class="text-xs text-mist-300 flex gap-1.5 items-center"><input type="checkbox" data-cdisc value="${esc(d)}" checked /> ${esc(d)}</label>`).join('')}
+                <input class="field !w-28 !py-1.5 !text-xs" id="c-rate" type="number" step="0.5" min="0" placeholder="£/lesson" />
+              </div>
+              <input class="field" id="c-levels" placeholder="Levels they coach e.g. Tumble L1-4 (optional)" />
+              <button class="btn btn-primary btn-sm" id="c-go">Invite coach</button>
+            </div>
+          </div>
+
+          <div class="surface-card p-5">
+            <h2 class="text-base font-semibold mb-1">2 · Add a family (with their sessions)</h2>
+            <p class="text-xs text-mist-500 mb-3">Their athletes and existing weekly lesson come over pre-booked; the email only asks them to pick a password.</p>
+            <div class="grid gap-2">
+              <input class="field" id="f-name" placeholder="Parent / guardian name" />
+              <input class="field" id="f-email" type="email" placeholder="parent@email.com" />
+              <div id="f-athletes" class="grid gap-2"></div>
+              <button class="btn btn-ghost btn-sm" id="f-add">+ another athlete</button>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <select class="field" id="f-coach"><option value="">No session yet — just add them</option>
+                  ${coaches.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+                </select>
+                <select class="field" id="f-slot" disabled><option value="">Pick a coach first…</option></select>
+              </div>
+              <label class="text-xs text-mist-300 flex gap-1.5 items-center"><input type="checkbox" id="f-weekly" checked /> Weekly (books the whole series, like their old standing session)</label>
+              <button class="btn btn-primary btn-sm" id="f-go">Invite family</button>
+            </div>
+          </div>
+        </div>
+        <p class="text-xs text-mist-500 mt-4 max-w-2xl">
+          ⚠️ Heads-up on volume: Supabase's built-in email sender is rate-limited to a handful of
+          invites per hour. For a big migration day, connect your own SMTP first
+          (Supabase dashboard → Authentication → SMTP) — then invite away.
+        </p>`;
+
+      const athHost = document.getElementById('f-athletes')!;
+      const addAthleteRow = () => {
+        const div = document.createElement('div');
+        div.className = 'grid grid-cols-2 gap-2';
+        div.innerHTML = `<input class="field" data-aname placeholder="Athlete name" /><input class="field" data-adob type="date" title="Date of birth" />`;
+        athHost.appendChild(div);
+      };
+      addAthleteRow();
+      document.getElementById('f-add')?.addEventListener('click', addAthleteRow);
+
+      const slotSel = document.getElementById('f-slot') as HTMLSelectElement;
+      document.getElementById('f-coach')?.addEventListener('change', (e) => {
+        const cid = (e.target as HTMLSelectElement).value;
+        if (!cid) {
+          slotSel.disabled = true;
+          slotSel.innerHTML = '<option value="">Pick a coach first…</option>';
+          return;
+        }
+        const theirs = (slots ?? []).filter((s) => (s.slot_coaches as unknown as { coach_id: string }[]).some((sc) => sc.coach_id === cid));
+        const seen = new Set<string>();
+        const options = theirs
+          .filter((s) => {
+            const key = s.series_id ?? s.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .map((s) => `<option value="${s.id}">${fmtDate(s.slot_date)} ${fmtTime(s.start_time)}${s.series_id ? ' (weekly)' : ' (one-off)'}</option>`);
+        slotSel.innerHTML = options.length ? `<option value="">No session</option>` + options.join('') : '<option value="">This coach has no upcoming slots — create them under Admin → Slots</option>';
+        slotSel.disabled = false;
+      });
+
+      document.getElementById('c-go')?.addEventListener('click', async () => {
+        const btn = document.getElementById('c-go') as HTMLButtonElement;
+        btn.disabled = true;
+        const res = await importApi({
+          action: 'invite_coach',
+          club_id: club.id,
+          name: (document.getElementById('c-name') as HTMLInputElement).value,
+          email: (document.getElementById('c-email') as HTMLInputElement).value,
+          disciplines: [...document.querySelectorAll<HTMLInputElement>('[data-cdisc]:checked')].map((x) => x.value),
+          rate: (document.getElementById('c-rate') as HTMLInputElement).value,
+          levels: (document.getElementById('c-levels') as HTMLInputElement).value,
+        });
+        btn.disabled = false;
+        if (res.error) return toast(res.error, 'err');
+        toast(res.invited ? 'Coach invited — they\'ve got mail. 📧' : 'Coach attached (they already had an account).');
+        render();
+      });
+
+      document.getElementById('f-go')?.addEventListener('click', async () => {
+        const btn = document.getElementById('f-go') as HTMLButtonElement;
+        const athletes = [...athHost.querySelectorAll('div')].map((row) => ({
+          name: (row.querySelector('[data-aname]') as HTMLInputElement).value.trim(),
+          dob: (row.querySelector('[data-adob]') as HTMLInputElement).value,
+        })).filter((a) => a.name && a.dob);
+        if (!athletes.length) return toast('Add at least one athlete (name + date of birth).', 'err');
+        btn.disabled = true;
+        const res = await importApi({
+          action: 'invite_family',
+          club_id: club.id,
+          name: (document.getElementById('f-name') as HTMLInputElement).value,
+          email: (document.getElementById('f-email') as HTMLInputElement).value,
+          athletes,
+          coach_id: (document.getElementById('f-coach') as HTMLSelectElement).value || null,
+          slot_id: slotSel.value || null,
+          weekly: (document.getElementById('f-weekly') as HTMLInputElement).checked,
+        });
+        btn.disabled = false;
+        if (res.error) return toast(res.error, 'err');
+        toast(`${res.invited ? 'Family invited 📧' : 'Family attached'} — ${res.athletes} athlete(s)${res.booked ? `, ${res.booked} lesson(s) pre-booked` : ''}.`);
+        render();
+      });
+    }
+
+    (async () => {
+      ctx = await requireAuth(['admin']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>
