@@ -67,7 +67,17 @@ Deno.serve(async (req) => {
 
     const { data: inv } = await svc.from("invoices").select("*").eq("id", invoice_id).single();
     if (!inv) return json({ error: "Invoice not found." }, 404);
-    if (inv.profile_id !== userData.user.id) return json({ error: "Not your invoice." }, 403);
+    if (inv.profile_id !== userData.user.id) {
+      // club admins may reconcile any of their club's invoices
+      const { data: adm } = await svc
+        .from("club_members")
+        .select("role")
+        .eq("club_id", inv.club_id)
+        .eq("profile_id", userData.user.id)
+        .eq("status", "active")
+        .single();
+      if (adm?.role !== "admin" || action === "checkout") return json({ error: "Not your invoice." }, 403);
+    }
 
     const { data: keys } = await svc
       .from("club_payment_keys")
@@ -106,26 +116,48 @@ Deno.serve(async (req) => {
           params["line_items[1][quantity]"] = "1";
           params["line_items[1][price_data][currency]"] = currency;
           params["line_items[1][price_data][unit_amount]"] = String(fee);
-          params["line_items[1][price_data][product_data][name]"] = "Card processing fee";
+          params["line_items[1][price_data][product_data][name]"] = "Payment processing fee";
         }
       }
+      // No payment_method_types: Stripe shows every method the club has enabled
+      // in its own dashboard — cards, Apple/Google Pay, Bacs Direct Debit, PayPal…
       const session = await stripe(keys.secret_key, "checkout/sessions", params);
+      await svc
+        .from("invoices")
+        .update({ meta: { ...(inv.meta ?? {}), stripe_session: session.id } })
+        .eq("id", inv.id);
       return json({ url: session.url });
     }
 
     if (action === "confirm") {
-      const sessionId = String(body.session_id ?? "");
-      if (!sessionId.startsWith("cs_")) return json({ error: "Bad session_id." }, 400);
+      // session_id comes from the checkout return URL; reconciles (e.g. a Bacs
+      // Direct Debit clearing days later) fall back to the stored session.
+      const sessionId = String(body.session_id ?? inv.meta?.stripe_session ?? "");
+      if (!sessionId.startsWith("cs_")) return json({ error: "No online payment to check for this invoice." }, 400);
       const session = await stripe(keys.secret_key, `checkout/sessions/${sessionId}`);
       if (session?.metadata?.invoice_id !== inv.id) return json({ error: "Session mismatch." }, 400);
-      if (session?.payment_status !== "paid") return json({ paid: false });
-      const { error: settleErr } = await svc.rpc("_settle_invoice", {
-        p_invoice: inv.id,
-        p_method: "card",
-        p_reference: String(session.payment_intent ?? sessionId),
-      });
-      if (settleErr) return json({ error: settleErr.message }, 500);
-      return json({ paid: true });
+
+      if (session?.payment_status === "paid" || session?.payment_status === "no_payment_required") {
+        const { error: settleErr } = await svc.rpc("_settle_invoice", {
+          p_invoice: inv.id,
+          p_method: "online",
+          p_reference: String(session.payment_intent ?? sessionId),
+        });
+        if (settleErr) return json({ error: settleErr.message }, 500);
+        return json({ paid: true });
+      }
+
+      // Completed checkout, money not landed yet = async method (Direct Debit).
+      if (session?.status === "complete") {
+        if (!inv.meta?.dd_processing) {
+          await svc
+            .from("invoices")
+            .update({ meta: { ...(inv.meta ?? {}), stripe_session: sessionId, dd_processing: true } })
+            .eq("id", inv.id);
+        }
+        return json({ paid: false, processing: true });
+      }
+      return json({ paid: false });
     }
 
     return json({ error: "Unknown action." }, 400);

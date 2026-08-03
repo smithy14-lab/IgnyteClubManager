@@ -36,6 +36,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       const money = (n: unknown) => sym + Number(n).toFixed(2);
       const credits = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
       const open = (invoices ?? []).filter((i) => ['due', 'overdue'].includes(i.status));
+      reconcileProcessing(open);
       const history = (invoices ?? []).filter((i) => !['due', 'overdue'].includes(i.status));
       const owed = open.reduce((s, i) => s + Number(i.amount), 0);
       const mine = athletes.filter((a) => a.enrolled);
@@ -73,7 +74,13 @@ import AppLayout from '../layouts/AppLayout.astro';
               <div class="flex items-center gap-2">
                 <span class="${pill[i.status]}">${i.status}</span>
                 <span class="text-sm font-semibold">${money(i.amount)}</span>
-                ${settings?.card_payments_enabled ? `<button class="btn btn-primary btn-sm" data-card="${i.id}">💳 Pay by card</button>` : ''}
+                ${
+                  (i.meta as { dd_processing?: boolean })?.dd_processing
+                    ? '<span class="pill pill-accent" title="Direct Debit takes ~3 working days to clear — it marks itself paid automatically.">⏳ processing</span>'
+                    : settings?.card_payments_enabled
+                      ? `<button class="btn btn-primary btn-sm" data-card="${i.id}">💳 Pay online</button>`
+                      : ''
+                }
               </div>
             </div>`
             )
@@ -206,7 +213,19 @@ import AppLayout from '../layouts/AppLayout.astro';
       history.replaceState(null, '', '/money');
       const res = await payApi({ action: 'confirm', invoice_id: inv, session_id: sessionId });
       if (res.paid) toast('Payment received — thank you! ✅');
+      else if (res.processing) toast('Direct Debit set up ✅ It takes ~3 working days to clear — the invoice will mark itself paid.');
       else if (res.error) toast(res.error, 'err');
+    }
+
+    /** Async payments (Direct Debit) clear days later — re-check them quietly. */
+    async function reconcileProcessing(open: { id: string; meta: unknown }[]) {
+      const pending = open.filter((i) => (i.meta as { dd_processing?: boolean })?.dd_processing);
+      if (!pending.length) return;
+      const results = await Promise.all(pending.map((i) => payApi({ action: 'confirm', invoice_id: i.id })));
+      if (results.some((r) => r.paid)) {
+        toast('A Direct Debit payment cleared ✅');
+        render();
+      }
     }
 
     (async () => {
