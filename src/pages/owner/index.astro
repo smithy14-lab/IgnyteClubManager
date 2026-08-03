@@ -22,13 +22,16 @@ import AppLayout from '../../layouts/AppLayout.astro';
       contact_email: string | null; created_at: string; families: number; coaches: number;
       pending: number; bookings_per_week: number; last_booking_at: string | null;
     };
+    let addonsByClub: Record<string, string[]> = {};
 
     async function render() {
-      const [{ data: health }, { data: leads }, { data: audit }] = await Promise.all([
+      const [{ data: health }, { data: leads }, { data: audit }, { data: addonRows }] = await Promise.all([
         supabase.rpc('owner_club_health'),
         supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(30),
         supabase.from('owner_audit').select('*').order('created_at', { ascending: false }).limit(15),
+        supabase.from('clubs').select('id, addons'),
       ]);
+      addonsByClub = Object.fromEntries((addonRows ?? []).map((r) => [r.id, r.addons ?? []]));
       const clubs = (health ?? []) as Club[];
       const liveClubs = clubs.filter((c) => c.status === 'active');
 
@@ -75,6 +78,8 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   <select class="field !w-auto !py-1 !text-xs" data-status="${c.id}">
                     ${['active', 'suspended', 'churned'].map((st) => `<option value="${st}" ${st === c.status ? 'selected' : ''}>${st}</option>`).join('')}
                   </select>
+                  <button class="btn btn-ghost btn-sm ${(addonsByClub[c.id] ?? []).includes('website') ? '!text-ignite-400' : ''}"
+                    data-addon="${c.id}" title="Toggle the Website add-on (for Free/Privates clubs)">🌐</button>
                   <button class="btn btn-ghost btn-sm" data-viewas="${c.id}" data-name="${esc(c.name)}">View as admin</button>
                 </div>
               </div>
@@ -151,6 +156,17 @@ import AppLayout from '../../layouts/AppLayout.astro';
           const { error } = await supabase.rpc('owner_set_club_status', { p_club: sel.dataset.status, p_status: sel.value });
           if (error) return toast(errMsg(error), 'err');
           toast('Status updated.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-addon]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const id = b.dataset.addon!;
+          const current = addonsByClub[id] ?? [];
+          const next = current.includes('website') ? current.filter((a) => a !== 'website') : [...current, 'website'];
+          const { error } = await supabase.rpc('owner_set_addons', { p_club: id, p_addons: next });
+          if (error) return toast(errMsg(error), 'err');
+          toast(next.includes('website') ? 'Website add-on ON.' : 'Website add-on off.');
           render();
         })
       );

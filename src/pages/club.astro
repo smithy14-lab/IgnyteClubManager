@@ -1,10 +1,13 @@
 ---
-// Public club portal. Served at /c/{slug} via the worker rewrite (or ?s=slug).
+// Public club site. Served at /c/{slug} and /c/{slug}/{page} via the worker
+// rewrite (or ?s=slug). Clubs with the website feature get a multi-page site
+// (custom pages + classes + coaches + contact); everyone else gets the
+// single-page portal.
 import AppLayout from '../layouts/AppLayout.astro';
 ---
 
 <AppLayout title="Club">
-  <div id="portal" class="max-w-lg mx-auto py-6">
+  <div id="portal" class="max-w-2xl mx-auto py-6">
     <p class="text-mist-500 text-sm text-center">Loading club…</p>
   </div>
 
@@ -13,8 +16,105 @@ import AppLayout from '../layouts/AppLayout.astro';
     import { esc, toast, errMsg, setActiveClub } from '../lib/app';
 
     const portal = document.getElementById('portal')!;
-    const m = location.pathname.match(/^\/c\/([a-z0-9-]+)/);
+    const m = location.pathname.match(/^\/c\/([a-z0-9-]+)(?:\/([a-z0-9-]+))?/);
     const slug = m?.[1] ?? new URLSearchParams(location.search).get('s') ?? '';
+    const pageSlug = m?.[2] ?? new URLSearchParams(location.search).get('p') ?? '';
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    type Site = {
+      name: string; slug: string; blurb: string | null; accent_color: string | null;
+      website: boolean; pages: { slug: string; title: string; body: string }[];
+      coaches: { name: string; disciplines: string[] | null; levels: string | null }[];
+      upcoming_slots: number; locations: string[];
+      classes?: { name: string; discipline: string; day_of_week: number; start_time: string; end_time: string;
+        age_min: number | null; age_max: number | null; monthly_fee: number | null;
+        price_per_session: number | null; trial_allowed: boolean }[];
+    };
+
+    /** Tiny markdown: headings, bold/italic, https links, lists, paragraphs. Escapes first. */
+    function md(src: string): string {
+      const inline = (s: string) =>
+        s
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+          .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a class="text-ignite-400 underline" href="$2" target="_blank" rel="noopener">$1</a>');
+      const blocks = esc(src).replace(/\r/g, '').split(/\n{2,}/);
+      return blocks
+        .map((b) => {
+          const t = b.trim();
+          if (!t) return '';
+          if (/^### /.test(t)) return `<h3 class="text-base font-semibold mt-4">${inline(t.slice(4))}</h3>`;
+          if (/^## /.test(t)) return `<h2 class="text-lg font-semibold mt-5">${inline(t.slice(3))}</h2>`;
+          if (/^# /.test(t)) return `<h1 class="text-xl font-semibold mt-5">${inline(t.slice(2))}</h1>`;
+          if (t.split('\n').every((l) => /^[-*] /.test(l.trim()))) {
+            return `<ul class="list-disc pl-5 mt-3 flex flex-col gap-1 text-sm text-mist-300">${t
+              .split('\n')
+              .map((l) => `<li>${inline(l.trim().slice(2))}</li>`)
+              .join('')}</ul>`;
+          }
+          return `<p class="mt-3 text-sm text-mist-300 leading-relaxed">${inline(t).replace(/\n/g, '<br />')}</p>`;
+        })
+        .join('');
+    }
+
+    const link = (p: string) => `/c/${slug}${p ? '/' + p : ''}`;
+
+    function classesHtml(c: Site) {
+      return (c.classes ?? []).length
+        ? `<div class="surface-card p-5 mt-4">
+            <p class="text-sm font-semibold mb-2">🤸 Weekly classes</p>
+            ${(c.classes ?? [])
+              .map(
+                (g) => `<div class="py-1.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+                  <p class="text-sm">${esc(g.name)}
+                    <span class="text-xs text-mist-500">· ${DAYS[g.day_of_week]}s ${g.start_time.slice(0, 5)}–${g.end_time.slice(0, 5)}${g.age_min != null || g.age_max != null ? ` · ages ${g.age_min ?? 0}–${g.age_max ?? '99+'}` : ''}</span></p>
+                  ${g.trial_allowed ? '<span class="pill pill-accent">trials open</span>' : ''}
+                </div>`
+              )
+              .join('')}
+            <p class="text-xs text-mist-500 mt-2">Join the club to enrol or book a taster.</p>
+          </div>`
+        : '<p class="text-sm text-mist-500 mt-4">No group classes yet — 1-2-1 privates are bookable in the app.</p>';
+    }
+
+    function coachesHtml(c: Site) {
+      return c.coaches.length
+        ? `<div class="surface-card p-5 mt-4">
+            <p class="text-sm font-semibold mb-2">Our coaches</p>
+            ${c.coaches
+              .map(
+                (co) => `<p class="text-sm py-1.5 border-t border-ink-700 first:border-0">${esc(co.name)}
+                  <span class="text-xs text-mist-500">${co.disciplines?.length ? '· ' + co.disciplines.join(' + ') : ''}${co.levels ? ' · ' + esc(co.levels) : ''}</span></p>`
+              )
+              .join('')}
+          </div>`
+        : '';
+    }
+
+    function joinHtml(c: Site, signedIn: boolean) {
+      return `<div class="surface-card p-5 mt-4">
+        <p class="text-sm font-semibold mb-2">Join ${esc(c.name)}</p>
+        <p class="text-xs text-mist-500 mb-3">Have the club's code? You're in instantly. Otherwise send a join request and the club will approve you.</p>
+        <div class="flex gap-2 mb-3">
+          <input class="field flex-1 uppercase" id="p-code" maxlength="6" placeholder="Club code (optional)" />
+          <button class="btn btn-primary" id="p-join">Join</button>
+        </div>
+        ${signedIn ? '' : `<p class="text-xs text-mist-500">You'll create your (free) family account first — takes a minute.</p>`}
+        <a href="/login" class="text-xs text-ignite-400 ${signedIn ? 'hidden' : ''}">Already have an account? Sign in</a>
+      </div>`;
+    }
+
+    function contactHtml(c: Site) {
+      return `<div class="surface-card p-5 mt-4">
+        <p class="text-sm font-semibold mb-2">📬 Ask ${esc(c.name)} anything</p>
+        <div class="grid gap-2">
+          <input class="field" id="e-name" placeholder="Your name" />
+          <input class="field" id="e-email" type="email" placeholder="you@email.com" />
+          <textarea class="field" id="e-msg" rows="3" placeholder="Ages, experience, what you're looking for…"></textarea>
+          <button class="btn btn-primary btn-sm" id="e-go">Send enquiry</button>
+        </div>
+      </div>`;
+    }
 
     async function render() {
       if (!slug) {
@@ -34,23 +134,16 @@ import AppLayout from '../layouts/AppLayout.astro';
           </div>`;
         return;
       }
-      const c = data as {
-        name: string; slug: string; blurb: string | null; accent_color: string | null;
-        coaches: { name: string; disciplines: string[] | null; levels: string | null }[];
-        upcoming_slots: number; locations: string[];
-        classes?: { name: string; discipline: string; day_of_week: number; start_time: string; end_time: string;
-          age_min: number | null; age_max: number | null; monthly_fee: number | null;
-          price_per_session: number | null; trial_allowed: boolean }[];
-      };
-      const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const c = data as Site;
       if (c.accent_color) {
         document.documentElement.style.setProperty('--color-ignite-500', c.accent_color);
         document.documentElement.style.setProperty('--color-ignite-400', c.accent_color);
         document.documentElement.style.setProperty('--color-ignite-600', c.accent_color);
       }
       const signedIn = Boolean(session.session);
+      const siteMode = c.website && (c.pages ?? []).length > 0;
 
-      portal.innerHTML = `
+      const hero = `
         <div class="text-center animate-rise">
           <div class="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center font-display font-bold text-white text-xl"
             style="background: linear-gradient(135deg, var(--color-charge-400), var(--color-ignite-500), var(--color-spark-500))">
@@ -59,55 +152,53 @@ import AppLayout from '../layouts/AppLayout.astro';
           <h1 class="text-2xl mt-4">${esc(c.name)}</h1>
           ${c.blurb ? `<p class="text-sm text-mist-400 mt-2">${esc(c.blurb)}</p>` : ''}
           ${c.locations.length ? `<p class="text-xs text-mist-500 mt-2">📍 ${c.locations.map((l) => esc(l)).join(' · ')}</p>` : ''}
-        </div>
+        </div>`;
 
+      const bookCallout = `
         <div class="surface-card p-5 mt-6">
           <p class="text-sm font-semibold">⚡ Book 1-2-1 private lessons online</p>
           <p class="text-xs text-mist-500 mt-1">${c.upcoming_slots} slot${c.upcoming_slots === 1 ? '' : 's'} open in the next two weeks.</p>
-        </div>
-
-        ${
-          (c.classes ?? []).length
-            ? `<div class="surface-card p-5 mt-4">
-                <p class="text-sm font-semibold mb-2">🤸 Weekly classes</p>
-                ${(c.classes ?? [])
-                  .map(
-                    (g) => `<div class="py-1.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
-                      <p class="text-sm">${esc(g.name)}
-                        <span class="text-xs text-mist-500">· ${DAYS[g.day_of_week]}s ${g.start_time.slice(0, 5)}–${g.end_time.slice(0, 5)}${g.age_min != null || g.age_max != null ? ` · ages ${g.age_min ?? 0}–${g.age_max ?? '99+'}` : ''}</span></p>
-                      ${g.trial_allowed ? '<span class="pill pill-accent">trials open</span>' : ''}
-                    </div>`
-                  )
-                  .join('')}
-                <p class="text-xs text-mist-500 mt-2">Join below to enrol or book a trial.</p>
-              </div>`
-            : ''
-        }
-
-        ${
-          c.coaches.length
-            ? `<div class="surface-card p-5 mt-4">
-                <p class="text-sm font-semibold mb-2">Our coaches</p>
-                ${c.coaches
-                  .map(
-                    (co) => `<p class="text-sm py-1.5 border-t border-ink-700 first:border-0">${esc(co.name)}
-                      <span class="text-xs text-mist-500">${co.disciplines?.length ? '· ' + co.disciplines.join(' + ') : ''}${co.levels ? ' · ' + esc(co.levels) : ''}</span></p>`
-                  )
-                  .join('')}
-              </div>`
-            : ''
-        }
-
-        <div class="surface-card p-5 mt-4">
-          <p class="text-sm font-semibold mb-2">Join ${esc(c.name)}</p>
-          <p class="text-xs text-mist-500 mb-3">Have the club's code? You're in instantly. Otherwise send a join request and the club will approve you.</p>
-          <div class="flex gap-2 mb-3">
-            <input class="field flex-1 uppercase" id="p-code" maxlength="6" placeholder="Club code (optional)" />
-            <button class="btn btn-primary" id="p-join">Join</button>
-          </div>
-          ${signedIn ? '' : `<p class="text-xs text-mist-500">You'll create your (free) family account first — takes a minute.</p>`}
-          <a href="/login" class="text-xs text-ignite-400 ${signedIn ? 'hidden' : ''}">Already have an account? Sign in</a>
         </div>`;
+
+      if (!siteMode) {
+        portal.innerHTML =
+          hero + bookCallout + classesHtml(c) + coachesHtml(c) + contactHtml(c) + joinHtml(c, signedIn);
+      } else {
+        const navItems: [string, string][] = [
+          ['Home', ''],
+          ...c.pages.map((p) => [p.title, p.slug] as [string, string]),
+          ['Classes', 'classes'],
+          ['Contact', 'contact'],
+        ];
+        const nav = `<nav class="flex flex-wrap gap-1.5 justify-center mt-6 mb-2">
+          ${navItems
+            .map(
+              ([label, s]) =>
+                `<a href="${link(s)}" class="btn btn-sm ${s === pageSlug ? 'btn-primary' : 'btn-ghost'}">${esc(label)}</a>`
+            )
+            .join('')}
+        </nav>`;
+
+        const page = c.pages.find((p) => p.slug === pageSlug);
+        let bodyHtml: string;
+        if (pageSlug === 'classes') bodyHtml = classesHtml(c) + joinHtml(c, signedIn);
+        else if (pageSlug === 'coaches') bodyHtml = coachesHtml(c) || '<p class="text-sm text-mist-500 mt-4">Coach profiles coming soon.</p>';
+        else if (pageSlug === 'contact') bodyHtml = contactHtml(c);
+        else if (page) bodyHtml = `<div class="surface-card p-6 mt-4 text-left">${md(page.body)}</div>`;
+        else bodyHtml = bookCallout + classesHtml(c) + coachesHtml(c) + joinHtml(c, signedIn); // home
+
+        portal.innerHTML = hero + nav + bodyHtml;
+      }
+
+      document.getElementById('e-go')?.addEventListener('click', async () => {
+        const name = (document.getElementById('e-name') as HTMLInputElement).value;
+        const email = (document.getElementById('e-email') as HTMLInputElement).value;
+        const msg = (document.getElementById('e-msg') as HTMLTextAreaElement).value;
+        const { error } = await supabase.rpc('submit_club_enquiry', { p_slug: slug, p_name: name, p_email: email, p_message: msg });
+        if (error) return toast(errMsg(error), 'err');
+        portal.querySelectorAll<HTMLInputElement>('#e-name,#e-email,#e-msg').forEach((i) => (i.value = ''));
+        toast('Sent! The club will get back to you. 📬');
+      });
 
       document.getElementById('p-join')?.addEventListener('click', async () => {
         const code = (document.getElementById('p-code') as HTMLInputElement).value.trim();

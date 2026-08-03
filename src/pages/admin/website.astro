@@ -1,0 +1,138 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Website · Admin">
+  <p class="eyebrow">Club admin</p>
+  <div class="flex items-center justify-between gap-2 mt-1 mb-1">
+    <h1 class="text-2xl">Your club website</h1>
+    <a href="/admin" class="btn btn-ghost btn-sm">← Admin</a>
+  </div>
+  <p class="text-sm text-mist-400 mb-5 max-w-2xl">
+    A real website at your club link — your pages plus the live class timetable, coach list
+    and an enquiry form that lands right here. Write pages in simple text:
+    <code># heading</code>, <code>**bold**</code>, <code>- lists</code>.
+  </p>
+
+  <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../../lib/supabase';
+    import { requireAuth, esc, toast, errMsg, fmtDateTime, type AuthCtx } from '../../lib/app';
+
+    const content = document.getElementById('content')!;
+    let ctx: AuthCtx;
+
+    async function render() {
+      const club = ctx.club!;
+      const [{ data: pages }, { data: enquiries }] = await Promise.all([
+        supabase.from('club_pages').select('*').eq('club_id', club.id).order('sort').order('title'),
+        supabase.from('club_enquiries').select('*').eq('club_id', club.id).order('created_at', { ascending: false }).limit(40),
+      ]);
+
+      const pageCard = (p?: { id?: string; slug?: string; title?: string; body?: string; sort?: number; published?: boolean }) => `
+        <div class="surface-card p-5 mb-4" data-pagecard="${p?.slug ?? ''}">
+          <div class="grid gap-2 sm:grid-cols-3">
+            <input class="field" data-f="title" value="${esc(p?.title ?? '')}" placeholder="Page title e.g. About us" />
+            <input class="field" data-f="slug" value="${esc(p?.slug ?? '')}" placeholder="address e.g. about" ${p ? 'disabled' : ''} />
+            <div class="flex gap-2 items-center">
+              <input class="field !w-20" data-f="sort" type="number" value="${p?.sort ?? 0}" title="order" />
+              <label class="text-xs text-mist-300 flex gap-1.5 items-center"><input type="checkbox" data-f="published" ${p?.published !== false ? 'checked' : ''} /> live</label>
+            </div>
+          </div>
+          <textarea class="field mt-2" data-f="body" rows="6" placeholder="# Welcome&#10;&#10;We are a competitive cheer & dance club…">${esc(p?.body ?? '')}</textarea>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" data-save="${p?.slug ?? ''}">${p ? 'Save page' : 'Add page'}</button>
+            ${p ? `<button class="btn btn-danger btn-sm" data-del="${p.slug}">Delete</button>` : ''}
+          </div>
+        </div>`;
+
+      content.innerHTML = `
+        <div class="surface-card p-5 mb-5 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p class="text-sm font-semibold">Your site is at <a class="text-ignite-400 underline" target="_blank" rel="noopener" href="/c/${esc(club.slug)}">/c/${esc(club.slug)}</a></p>
+            <p class="text-xs text-mist-500 mt-1">Home, Classes, Contact and coach list are built in — your pages appear in the menu automatically. Branding colours come from Admin → Branding.</p>
+          </div>
+          <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="/c/${esc(club.slug)}">Preview ↗</a>
+        </div>
+
+        <div class="grid gap-5 lg:grid-cols-2 items-start">
+          <div>
+            <h2 class="text-base font-semibold mb-3">📄 Pages</h2>
+            ${(pages ?? []).map((p) => pageCard(p)).join('')}
+            <h3 class="text-sm font-semibold mb-2 mt-5 text-mist-300">Add a page</h3>
+            ${pageCard()}
+          </div>
+          <div>
+            <h2 class="text-base font-semibold mb-3">📬 Enquiries</h2>
+            ${
+              (enquiries ?? []).length
+                ? (enquiries ?? [])
+                    .map(
+                      (e) => `
+                <div class="surface-card p-4 mb-3">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-sm font-semibold">${esc(e.name)} <a class="text-xs text-ignite-400" href="mailto:${esc(e.email)}">${esc(e.email)}</a></p>
+                    <span class="pill ${e.status === 'new' ? 'pill-accent' : e.status === 'contacted' ? 'pill-warn' : ''}">${e.status}</span>
+                  </div>
+                  ${e.message ? `<p class="text-xs text-mist-400 mt-1.5">${esc(e.message)}</p>` : ''}
+                  <p class="text-xs text-mist-500 mt-1">${fmtDateTime(e.created_at)}</p>
+                  ${
+                    e.status !== 'closed'
+                      ? `<div class="mt-2 flex gap-1.5">
+                          ${e.status === 'new' ? `<button class="btn btn-ghost btn-sm" data-enq="contacted:${e.id}">Mark contacted</button>` : ''}
+                          <button class="btn btn-ghost btn-sm" data-enq="closed:${e.id}">Close</button>
+                        </div>`
+                      : ''
+                  }
+                </div>`
+                    )
+                    .join('')
+                : '<p class="text-sm text-mist-500">No enquiries yet — they arrive from the Contact page on your site.</p>'
+            }
+          </div>
+        </div>`;
+
+      content.querySelectorAll<HTMLButtonElement>('[data-save]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const card = b.closest('[data-pagecard]')!;
+          const f = (n: string) => card.querySelector(`[data-f="${n}"]`) as HTMLInputElement;
+          const { error } = await supabase.rpc('save_club_page', {
+            p_club: club.id,
+            p_slug: b.dataset.save || f('slug').value.trim().toLowerCase(),
+            p_title: f('title').value.trim(),
+            p_body: (card.querySelector('[data-f="body"]') as HTMLTextAreaElement).value,
+            p_sort: Number(f('sort').value || 0),
+            p_published: (card.querySelector('[data-f="published"]') as HTMLInputElement).checked,
+          });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Page saved — it\'s live on your site.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Delete this page from your site?')) return;
+          const { error } = await supabase.rpc('delete_club_page', { p_club: club.id, p_slug: b.dataset.del });
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-enq]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [status, id] = b.dataset.enq!.split(':');
+          const { error } = await supabase.from('club_enquiries').update({ status }).eq('id', id);
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+    }
+
+    (async () => {
+      ctx = await requireAuth(['admin']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>
