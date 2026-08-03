@@ -72,7 +72,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
           supabase.from('membership_plans').select('*').eq('club_id', club.id).order('monthly_fee'),
           supabase.from('memberships').select('*, athletes(name), membership_plans(name, monthly_fee), profiles!memberships_payer_id_fkey(full_name)').eq('club_id', club.id).eq('status', 'active').order('created_at'),
           supabase.from('club_members').select('profile_id, role, profiles(full_name, email)').eq('club_id', club.id).eq('status', 'active'),
-          supabase.from('club_settings').select('currency, payment_instructions, payment_link_url, invoice_due_days, card_payments_enabled').eq('club_id', club.id).single(),
+          supabase.from('club_settings').select('currency, payment_instructions, payment_link_url, invoice_due_days, card_payments_enabled, billing_day, late_fee_amount, late_fee_after_days').eq('club_id', club.id).single(),
           supabase.from('athlete_enrolments').select('athletes(id, name, parent_id, profile_id)').eq('club_id', club.id),
         ]);
       if (error) return toast(errMsg(error), 'err');
@@ -251,11 +251,27 @@ import AppLayout from '../../layouts/AppLayout.astro';
               <h2 class="text-base font-semibold mb-1">⚙️ How families pay you</h2>
               <p class="text-xs text-mist-500 mb-3">Shown on every family's Money page. Paste a Stripe/PayPal/GoCardless payment link if you have one — the money goes straight to you, we never touch it.</p>
               <div class="grid gap-2 sm:grid-cols-4">
-                <input class="field" id="ps-cur" value="${esc(sym)}" maxlength="3" placeholder="£" />
-                <input class="field" id="ps-days" type="number" min="0" max="60" value="${settings?.invoice_due_days ?? 7}" placeholder="Due days" />
-                <input class="field sm:col-span-2" id="ps-link" value="${esc(settings?.payment_link_url ?? '')}" placeholder="https:// payment link (optional)" />
+                <div><label class="form-label">Currency</label>
+                  <input class="field" id="ps-cur" value="${esc(sym)}" maxlength="3" placeholder="£" /></div>
+                <div><label class="form-label">Days to pay</label>
+                  <input class="field" id="ps-days" type="number" min="0" max="60" value="${settings?.invoice_due_days ?? 7}" /></div>
+                <div class="sm:col-span-2"><label class="form-label">Payment link (optional)</label>
+                  <input class="field" id="ps-link" value="${esc(settings?.payment_link_url ?? '')}" placeholder="https://…" /></div>
+                <div><label class="form-label">Bill memberships on the…</label>
+                  <select class="field" id="ps-billday">
+                    ${Array.from({ length: 28 }, (_, i) => i + 1).map((d) => `<option value="${d}" ${(settings?.billing_day ?? 1) === d ? 'selected' : ''}>${d}${d === 1 ? 'st' : d === 2 ? 'nd' : d === 3 ? 'rd' : d === 21 ? 'st' : d === 22 ? 'nd' : d === 23 ? 'rd' : 'th'} of the month</option>`).join('')}
+                  </select></div>
+                <div><label class="form-label">Late fee (${esc(sym)}, 0 = off)</label>
+                  <input class="field" id="ps-latefee" type="number" step="0.5" min="0" max="100" value="${settings?.late_fee_amount ?? 0}" /></div>
+                <div><label class="form-label">Grace days before fee</label>
+                  <input class="field" id="ps-latedays" type="number" min="0" max="60" value="${settings?.late_fee_after_days ?? 7}" /></div>
                 <textarea class="field sm:col-span-4" id="ps-instr" rows="3" placeholder="Bank transfer details, cash desk hours…">${esc(settings?.payment_instructions ?? '')}</textarea>
               </div>
+              <p class="text-xs text-mist-500 mt-1.5">
+                Example: bill on the 1st with 11 days to pay → due the 12th. With a late fee and
+                0 grace days, anyone unpaid on the 13th is charged the fee automatically (they're
+                notified; a clearing Direct Debit never counts as late).
+              </p>
               <button class="btn btn-primary btn-sm mt-2" id="ps-go">Save payment settings</button>
               <div class="mt-4 pt-3 border-t border-ink-700">
                 <p class="text-xs font-semibold text-mist-300 mb-1">💳 Card payments — your own Stripe
@@ -379,6 +395,9 @@ import AppLayout from '../../layouts/AppLayout.astro';
           p_instructions: (document.getElementById('ps-instr') as HTMLTextAreaElement).value,
           p_link: (document.getElementById('ps-link') as HTMLInputElement).value.trim(),
           p_due_days: Number((document.getElementById('ps-days') as HTMLInputElement).value || 7),
+          p_billing_day: Number((document.getElementById('ps-billday') as HTMLSelectElement).value || 1),
+          p_late_fee: Number((document.getElementById('ps-latefee') as HTMLInputElement).value || 0),
+          p_late_fee_days: Number((document.getElementById('ps-latedays') as HTMLInputElement).value || 0),
         });
         if (e) return toast(errMsg(e), 'err');
         toast('Payment settings saved.');
