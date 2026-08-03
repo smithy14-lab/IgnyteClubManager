@@ -32,9 +32,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
             <p class="text-sm">${esc(r.name)} <span class="text-xs text-mist-500">(${ageFromDob(r.dob)})</span>
               ${r.trial ? '<span class="pill pill-accent">⭐ trial</span>' : ''}
               ${r.medical ? '<span class="pill pill-warn" title="Medical notes — see athlete profile">🚑</span>' : ''}</p>
-            <div class="flex gap-1.5">
+            <div class="flex gap-1.5 flex-wrap">
               <button class="btn btn-sm ${r.attendance === 'present' ? 'btn-primary' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:present">Present</button>
               <button class="btn btn-sm ${r.attendance === 'absent' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:absent">Absent</button>
+              <button class="btn btn-sm ${r.attendance === 'ill' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:ill" title="Off ill">🤒</button>
+              <button class="btn btn-sm ${r.attendance === 'injured' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:injured" title="Injured">🩹</button>
             </div>
           </div>`
           )

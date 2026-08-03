@@ -10,7 +10,7 @@
  *    show the last-known bookings/progress while offline. Auth and writes are
  *    never cached.
  */
-const VERSION = 'v6';
+const VERSION = 'v7';
 const SHELL_CACHE = `ignyte-shell-${VERSION}`;
 const ASSET_CACHE = `ignyte-assets-${VERSION}`;
 const DATA_CACHE = `ignyte-data-${VERSION}`;

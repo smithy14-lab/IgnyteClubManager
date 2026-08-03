@@ -192,7 +192,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
                 ${b.athletes?.medical_notes ? `<p class="text-xs text-charge-400 mt-0.5">🚑 ${esc(b.athletes.medical_notes)}</p>` : ''}
                 ${
                   b.attendance
-                    ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'} mt-1">${b.attendance === 'present' ? 'Present' : 'Absent'}</span>`
+                    ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'} mt-1">${{ present: 'Present', absent: 'Absent', ill: '🤒 Ill', injured: '🩹 Injured' }[b.attendance as string] ?? b.attendance}</span>`
                     : past
                       ? '<span class="pill pill-warn mt-1">Register due</span>'
                       : ''
@@ -202,7 +202,9 @@ import AppLayout from '../../layouts/AppLayout.astro';
                 ${
                   past
                     ? `<button class="btn btn-ghost btn-sm" data-present="${b.id}">Present</button>
-                       <button class="btn btn-ghost btn-sm" data-absent="${b.id}">Absent</button>`
+                       <button class="btn btn-ghost btn-sm" data-absent="${b.id}">Absent</button>
+                       <button class="btn btn-ghost btn-sm" data-ill="${b.id}" title="Off ill">🤒</button>
+                       <button class="btn btn-ghost btn-sm" data-injured="${b.id}" title="Injured">🩹</button>`
                     : `<button class="btn btn-danger btn-sm" data-coach-cancel="${b.id}">Cancel</button>`
                 }
                 <button class="btn btn-primary btn-sm" data-progress="${b.athletes?.id}" data-booking="${b.id}" data-name="${esc(b.athletes?.name)}">Progress</button>
@@ -220,6 +222,12 @@ import AppLayout from '../../layouts/AppLayout.astro';
       );
       content.querySelectorAll<HTMLButtonElement>('[data-absent]').forEach((b) =>
         b.addEventListener('click', () => mark(b.dataset.absent!, 'absent'))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-ill]').forEach((b) =>
+        b.addEventListener('click', () => mark(b.dataset.ill!, 'ill'))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-injured]').forEach((b) =>
+        b.addEventListener('click', () => mark(b.dataset.injured!, 'injured'))
       );
       content.querySelectorAll<HTMLButtonElement>('[data-coach-cancel]').forEach((b) =>
         b.addEventListener('click', async () => {
@@ -299,7 +307,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       );
     }
 
-    async function mark(bookingId: string, attendance: 'present' | 'absent') {
+    async function mark(bookingId: string, attendance: 'present' | 'absent' | 'ill' | 'injured') {
       const { error } = await supabase.rpc('take_register', {
         p_booking_id: bookingId,
         p_attendance: attendance,

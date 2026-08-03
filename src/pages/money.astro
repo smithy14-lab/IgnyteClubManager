@@ -24,7 +24,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       const me = ctx.profile.id;
       const [{ data: settings }, { data: invoices }, { data: ledger }, { data: mems }, { data: plans }, athletes] =
         await Promise.all([
-          supabase.from('club_settings').select('currency, payment_instructions, payment_link_url').eq('club_id', club.id).single(),
+          supabase.from('club_settings').select('currency, payment_instructions, payment_link_url, card_payments_enabled').eq('club_id', club.id).single(),
           supabase.from('invoices').select('*').eq('club_id', club.id).eq('profile_id', me).order('created_at', { ascending: false }).limit(60),
           supabase.from('credit_ledger').select('delta').eq('club_id', club.id).eq('profile_id', me),
           supabase.from('memberships').select('id, status, started_on, athlete_id, payer_id, athletes(name), membership_plans(name, monthly_fee, classes_per_week, private_credits_per_month)').eq('club_id', club.id),
@@ -73,12 +73,13 @@ import AppLayout from '../layouts/AppLayout.astro';
               <div class="flex items-center gap-2">
                 <span class="${pill[i.status]}">${i.status}</span>
                 <span class="text-sm font-semibold">${money(i.amount)}</span>
+                ${settings?.card_payments_enabled ? `<button class="btn btn-primary btn-sm" data-card="${i.id}">💳 Pay by card</button>` : ''}
               </div>
             </div>`
             )
             .join('')}
           <div class="mt-4 pt-3 border-t border-ink-700">
-            ${settings?.payment_link_url ? `<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="${esc(settings.payment_link_url)}">Pay online ↗</a>` : ''}
+            ${settings?.payment_link_url ? `<a class="btn ${settings?.card_payments_enabled ? 'btn-ghost' : 'btn-primary'} btn-sm" target="_blank" rel="noopener" href="${esc(settings.payment_link_url)}">Pay online ↗</a>` : ''}
             ${settings?.payment_instructions ? `<p class="text-xs text-mist-300 mt-3 whitespace-pre-line">${esc(settings.payment_instructions)}</p>` : ''}
             ${!settings?.payment_link_url && !settings?.payment_instructions ? '<p class="text-xs text-mist-500">Ask the club how they take payment — bank transfer or cash at the desk.</p>' : ''}
           </div>
@@ -170,10 +171,47 @@ import AppLayout from '../layouts/AppLayout.astro';
           render();
         })
       );
+      content.querySelectorAll<HTMLButtonElement>('[data-card]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          const res = await payApi({ action: 'checkout', invoice_id: b.dataset.card, return_url: location.origin + '/money' });
+          if (res.error || !res.url) {
+            b.disabled = false;
+            return toast(res.error ?? 'Card payments are unavailable right now.', 'err');
+          }
+          location.href = res.url;
+        })
+      );
+    }
+
+    async function payApi(body: Record<string, unknown>): Promise<{ url?: string; paid?: boolean; error?: string }> {
+      const { data: s } = await supabase.auth.getSession();
+      const res = await fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/pay`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${s.session?.access_token ?? ''}`,
+          apikey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify(body),
+      });
+      return res.json().catch(() => ({ error: 'Payment service unreachable.' }));
+    }
+
+    async function confirmCardReturn() {
+      const params = new URLSearchParams(location.search);
+      const sessionId = params.get('paid');
+      const inv = params.get('inv');
+      if (!sessionId || !inv) return;
+      history.replaceState(null, '', '/money');
+      const res = await payApi({ action: 'confirm', invoice_id: inv, session_id: sessionId });
+      if (res.paid) toast('Payment received — thank you! ✅');
+      else if (res.error) toast(res.error, 'err');
     }
 
     (async () => {
       ctx = await requireAuth('any');
+      await confirmCardReturn();
       await render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');

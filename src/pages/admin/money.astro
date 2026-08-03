@@ -46,7 +46,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
           supabase.from('membership_plans').select('*').eq('club_id', club.id).order('monthly_fee'),
           supabase.from('memberships').select('*, athletes(name), membership_plans(name, monthly_fee), profiles!memberships_payer_id_fkey(full_name)').eq('club_id', club.id).eq('status', 'active').order('created_at'),
           supabase.from('club_members').select('profile_id, role, profiles(full_name, email)').eq('club_id', club.id).eq('status', 'active'),
-          supabase.from('club_settings').select('currency, payment_instructions, payment_link_url, invoice_due_days').eq('club_id', club.id).single(),
+          supabase.from('club_settings').select('currency, payment_instructions, payment_link_url, invoice_due_days, card_payments_enabled').eq('club_id', club.id).single(),
           supabase.from('athlete_enrolments').select('athletes(id, name, parent_id, profile_id)').eq('club_id', club.id),
         ]);
       if (error) return toast(errMsg(error), 'err');
@@ -229,6 +229,29 @@ import AppLayout from '../../layouts/AppLayout.astro';
                 <textarea class="field sm:col-span-4" id="ps-instr" rows="3" placeholder="Bank transfer details, cash desk hours…">${esc(settings?.payment_instructions ?? '')}</textarea>
               </div>
               <button class="btn btn-primary btn-sm mt-2" id="ps-go">Save payment settings</button>
+              <div class="mt-4 pt-3 border-t border-ink-700">
+                <p class="text-xs font-semibold text-mist-300 mb-1">💳 Card payments — your own Stripe
+                  ${settings?.card_payments_enabled ? '<span class="pill pill-success">on</span>' : '<span class="pill">off</span>'}</p>
+                <p class="text-xs text-mist-500 mb-2">
+                  Families get a "Pay by card" button on every invoice. Payments go straight into
+                  <b>your</b> Stripe account — Ignyte adds 0%. In Stripe: Developers → API keys →
+                  create a <b>Restricted key</b> with Checkout Sessions (write) + Payment Intents (read), paste it here.
+                </p>
+                <input class="field" id="st-key" type="password" placeholder="rk_live_… (stored securely, never shown again)" autocomplete="off" />
+                <div class="flex flex-wrap gap-2 items-center mt-2">
+                  <label class="text-xs text-mist-300 flex gap-1.5 items-center">
+                    <input type="checkbox" id="st-pass" ${settings?.card_payments_enabled ? '' : 'checked'} /> Add the card fee to the family's total
+                  </label>
+                  <input class="field !w-20 !py-1 !text-xs" id="st-pct" type="number" step="0.1" min="0" value="1.5" title="fee %" />
+                  <span class="text-xs text-mist-500">% +</span>
+                  <input class="field !w-20 !py-1 !text-xs" id="st-fix" type="number" step="0.01" min="0" value="0.20" title="fixed fee" />
+                  <span class="text-xs text-mist-500">fixed</span>
+                </div>
+                <div class="flex gap-2 mt-2">
+                  <button class="btn btn-primary btn-sm" id="st-save">Connect Stripe</button>
+                  ${settings?.card_payments_enabled ? '<button class="btn btn-danger btn-sm" id="st-off">Disconnect</button>' : ''}
+                </div>
+              </div>
             </div>
           </div>
         </div>`;
@@ -325,6 +348,27 @@ import AppLayout from '../../layouts/AppLayout.astro';
         });
         if (e) return toast(errMsg(e), 'err');
         toast('Payment settings saved.');
+        render();
+      });
+      document.getElementById('st-save')?.addEventListener('click', async () => {
+        const key = (document.getElementById('st-key') as HTMLInputElement).value.trim();
+        if (!key) return toast('Paste your Stripe restricted key first.', 'err');
+        const { error: e } = await supabase.rpc('admin_set_stripe_key', {
+          p_club: club.id,
+          p_secret: key,
+          p_pass_fees: (document.getElementById('st-pass') as HTMLInputElement).checked,
+          p_fee_percent: Number((document.getElementById('st-pct') as HTMLInputElement).value || 1.5),
+          p_fee_fixed: Number((document.getElementById('st-fix') as HTMLInputElement).value || 0.2),
+        });
+        if (e) return toast(errMsg(e), 'err');
+        toast('Stripe connected — families can now pay by card. 🎉');
+        render();
+      });
+      document.getElementById('st-off')?.addEventListener('click', async () => {
+        if (!confirm('Disconnect Stripe? The "Pay by card" button disappears for families.')) return;
+        const { error: e } = await supabase.rpc('admin_set_stripe_key', { p_club: club.id, p_secret: '', p_pass_fees: false, p_fee_percent: 1.5, p_fee_fixed: 0.2 });
+        if (e) return toast(errMsg(e), 'err');
+        toast('Stripe disconnected.');
         render();
       });
       document.getElementById('x-money')?.addEventListener('click', async () => {
