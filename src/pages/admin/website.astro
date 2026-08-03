@@ -28,7 +28,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const [{ data: pages }, { data: enquiries }, { data: clubRow }] = await Promise.all([
         supabase.from('club_pages').select('*').eq('club_id', club.id).order('sort').order('title'),
         supabase.from('club_enquiries').select('*').eq('club_id', club.id).order('created_at', { ascending: false }).limit(40),
-        supabase.from('clubs').select('custom_domain, custom_domain_status, mailbox_alias').eq('id', club.id).single(),
+        supabase.from('clubs').select('custom_domain, custom_domain_status, mailbox_alias, starter_status').eq('id', club.id).single(),
       ]);
 
       const pageCard = (p?: { id?: string; slug?: string; title?: string; body?: string; sort?: number; published?: boolean }) => `
@@ -72,6 +72,17 @@ import AppLayout from '../../layouts/AppLayout.astro';
           }
         </div>
 
+        <div class="surface-card p-5 mb-5">
+          <p class="text-sm font-semibold">🚀 Starter Package — £299 one-off
+            ${clubRow?.starter_status ? `<span class="pill ${clubRow.starter_status === 'done' ? 'pill-success' : 'pill-accent'}">${clubRow.starter_status.replace('_', ' ')}</span>` : ''}</p>
+          ${
+            clubRow?.starter_status
+              ? `<p class="text-xs text-mist-500 mt-1.5">${clubRow.starter_status === 'done' ? 'All set up — website, payments and people are live. 🎉' : 'Ignyte is building your setup — we\'ll be in touch at your club contact email.'}</p>`
+              : `<p class="text-xs text-mist-500 mt-1.5 mb-2">We do the whole setup with you: website built, domain & mailbox wired, Stripe connected, and your coaches, families & sessions migrated from your old system.</p>
+                 <button class="btn btn-primary btn-sm" id="starter-go">Request the Starter Package</button>`
+          }
+        </div>
+
         <div class="grid gap-5 lg:grid-cols-2 items-start">
           <div>
             <h2 class="text-base font-semibold mb-3">📄 Pages</h2>
@@ -109,6 +120,13 @@ import AppLayout from '../../layouts/AppLayout.astro';
           </div>
         </div>`;
 
+      document.getElementById('starter-go')?.addEventListener('click', async () => {
+        if (!confirm('Request the £299 Starter Package? Ignyte will contact you to kick off — payment is arranged directly, nothing is charged here.')) return;
+        const { error } = await supabase.rpc('request_starter_package', { p_club: club.id });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Requested! Ignyte will be in touch. 🚀');
+        render();
+      });
       document.getElementById('dom-go')?.addEventListener('click', async () => {
         const domain = (document.getElementById('dom-name') as HTMLInputElement).value.trim();
         const mail = (document.getElementById('dom-mail') as HTMLInputElement).value.trim();

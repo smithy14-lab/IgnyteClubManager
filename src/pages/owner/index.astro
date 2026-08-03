@@ -22,17 +22,17 @@ import AppLayout from '../../layouts/AppLayout.astro';
       contact_email: string | null; created_at: string; families: number; coaches: number;
       pending: number; bookings_per_week: number; last_booking_at: string | null;
     };
-    let extraByClub: Record<string, { addons: string[]; custom_domain: string | null; custom_domain_status: string | null; mailbox_alias: string | null }> = {};
+    let extraByClub: Record<string, { addons: string[]; custom_domain: string | null; custom_domain_status: string | null; mailbox_alias: string | null; starter_status: string | null }> = {};
 
     async function render() {
       const [{ data: health }, { data: leads }, { data: audit }, { data: addonRows }] = await Promise.all([
         supabase.rpc('owner_club_health'),
         supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(30),
         supabase.from('owner_audit').select('*').order('created_at', { ascending: false }).limit(15),
-        supabase.from('clubs').select('id, addons, custom_domain, custom_domain_status, mailbox_alias'),
+        supabase.from('clubs').select('id, addons, custom_domain, custom_domain_status, mailbox_alias, starter_status'),
       ]);
       extraByClub = Object.fromEntries(
-        (addonRows ?? []).map((r) => [r.id, { addons: r.addons ?? [], custom_domain: r.custom_domain, custom_domain_status: r.custom_domain_status, mailbox_alias: r.mailbox_alias }])
+        (addonRows ?? []).map((r) => [r.id, { addons: r.addons ?? [], custom_domain: r.custom_domain, custom_domain_status: r.custom_domain_status, mailbox_alias: r.mailbox_alias, starter_status: r.starter_status }])
       );
       const clubs = (health ?? []) as Club[];
       const liveClubs = clubs.filter((c) => c.status === 'active');
@@ -87,6 +87,14 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   <button class="btn btn-ghost btn-sm" data-viewas="${c.id}" data-name="${esc(c.name)}">View as admin</button>
                 </div>
               </div>
+              ${
+                extraByClub[c.id]?.starter_status
+                  ? `<p class="text-xs mt-1.5 ${extraByClub[c.id].starter_status === 'done' ? 'text-mist-400' : 'text-charge-400'}">
+                      🚀 starter: ${extraByClub[c.id].starter_status!.replace('_', ' ')}
+                      ${extraByClub[c.id].starter_status !== 'done' ? `<button class="btn btn-ghost btn-sm ml-1" data-starter="${c.id}:${extraByClub[c.id].starter_status === 'requested' ? 'in_progress' : 'done'}">${extraByClub[c.id].starter_status === 'requested' ? 'Start work' : 'Mark done'}</button>` : ''}
+                    </p>`
+                  : ''
+              }
               ${
                 extraByClub[c.id]?.custom_domain
                   ? `<p class="text-xs mt-1.5 ${extraByClub[c.id].custom_domain_status === 'live' ? 'text-mist-400' : 'text-charge-400'}">
@@ -180,6 +188,15 @@ import AppLayout from '../../layouts/AppLayout.astro';
           const { error } = await supabase.rpc('owner_set_addons', { p_club: id, p_addons: next });
           if (error) return toast(errMsg(error), 'err');
           toast(`${addon} add-on ${next.includes(addon) ? 'ON' : 'off'}.`);
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-starter]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [id, status] = b.dataset.starter!.split(':');
+          const { error } = await supabase.rpc('owner_set_starter_status', { p_club: id, p_status: status });
+          if (error) return toast(errMsg(error), 'err');
+          toast(status === 'done' ? 'Starter Package complete — club notified. 🚀' : 'Marked in progress.');
           render();
         })
       );
