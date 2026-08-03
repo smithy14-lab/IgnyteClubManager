@@ -5,47 +5,53 @@ const tiers = [
   {
     name: 'Free',
     price: '£0',
-    sub: 'the basics, to get you off the spreadsheet',
+    sub: 'a real club website and classes — actually free',
     highlight: false,
     features: [
-      '1-2-1 booking, weekly slots & waiting lists',
-      'Registers on the coach’s phone',
-      'Your own club page & join code',
-      'Up to 40 athletes',
+      'Your club website — pages, enquiry form, live timetable',
+      'Group classes: booking, registers & waiting lists',
+      'Free taster trials with automatic follow-ups',
+      'Club page, join codes & member approvals',
+      'Up to 30 athletes',
     ],
     cta: ['Start free — set up in minutes', '/start'],
   },
   {
-    name: 'Privates',
+    name: 'Small',
     price: '£15/mo',
-    sub: 'everything for a private-lesson club — nothing you don’t need',
+    sub: 'Free + the 1-2-1 privates engine, for growing clubs',
     highlight: false,
     features: [
-      'Everything in Free, unlimited athletes',
+      'Everything in Free, up to 100 athletes',
+      '1-2-1 private lessons: slots, weekly series, coach cut-offs',
       'Skill journeys, badges & videos families love',
       'Invoicing & online payments — card, Direct Debit, 0% fees',
-      'Late fees & automatic payment chasing',
-      'Credits, packs & makeup tokens',
+      'Late fees, chasing, credits, packs & makeup tokens',
       'Broadcasts + Excel money & coach-pay exports',
+      'Paid taster trials',
     ],
     cta: ['Start free, upgrade when ready', '/start'],
   },
   {
     name: 'Club',
-    price: '£29/mo',
-    sub: 'the full club manager — classes, memberships, your brand',
+    price: '£35/mo',
+    sub: 'everything, on your own domain — the full club platform',
     highlight: true,
     features: [
-      'Everything in Privates',
-      'Group classes, taster trials & class waiting lists',
+      'Everything in Small, unlimited athletes',
       'Monthly memberships billed on your chosen day',
-      'Your own club website — pages, enquiries, live timetable',
+      'Your own domain (yourclub.co.uk) + club mailbox',
       'Your branding — colours & logo everywhere',
       'Coach & family migration from your old system',
       'Priority support & early access',
     ],
     cta: ['Start free, upgrade any time', '/start'],
   },
+];
+
+const addons = [
+  ['Privates', '£10/mo', '1-2-1 lesson management on its own: slots, weekly series, skill journeys, invoicing & online payments. Perfect if privates are all you run.'],
+  ['Website Pro', '£10/mo', 'Just the website, properly yours: custom domain, club mailbox and your own colours & logo — on top of the free builder.'],
 ];
 ---
 
@@ -73,10 +79,20 @@ const tiers = [
         </div>
       ))}
     </div>
+    <div class="mt-8 text-left">
+      <p class="eyebrow justify-center flex">Or pick just what you need</p>
+      <div class="mt-3 grid gap-4 sm:grid-cols-2">
+        {addons.map(([name, price, blurb]) => (
+          <div class="surface-card p-5">
+            <p class="text-sm font-semibold">{name} <span class="ignite-text font-display">{price}</span> <span class="text-xs text-mist-500">on top of Free</span></p>
+            <p class="text-xs text-mist-400 mt-1.5">{blurb}</p>
+          </div>
+        ))}
+      </div>
+    </div>
     <p class="mt-6 text-xs text-mist-500">
-      Payments for lessons stay between you and your families — we never take a cut.<br />
-      Add-ons: <b>Club Website</b> £10/mo on Free &amp; Privates (included with Club) — a real
-      multi-page site with your pages, live class timetable and enquiry form at your club link.
+      Every plan: payments stay between you and your families — we never take a cut of club revenue.
+      Modules stack however you like; upgrade, downgrade or add on any time.
     </p>
   </section>
 </AppLayout>

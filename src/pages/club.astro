@@ -17,8 +17,11 @@ import AppLayout from '../layouts/AppLayout.astro';
 
     const portal = document.getElementById('portal')!;
     const m = location.pathname.match(/^\/c\/([a-z0-9-]+)(?:\/([a-z0-9-]+))?/);
-    const slug = m?.[1] ?? new URLSearchParams(location.search).get('s') ?? '';
-    const pageSlug = m?.[2] ?? new URLSearchParams(location.search).get('p') ?? '';
+    let slug = m?.[1] ?? new URLSearchParams(location.search).get('s') ?? '';
+    let pageSlug = m?.[2] ?? new URLSearchParams(location.search).get('p') ?? '';
+    // Custom club domain: the host IS the club; the path is the page.
+    const onCustomDomain = !slug && !/workers\.dev$|^localhost$|^127\./.test(location.hostname);
+    if (onCustomDomain) pageSlug = location.pathname.replaceAll('/', '');
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     type Site = {
@@ -57,7 +60,7 @@ import AppLayout from '../layouts/AppLayout.astro';
         .join('');
     }
 
-    const link = (p: string) => `/c/${slug}${p ? '/' + p : ''}`;
+    const link = (p: string) => (onCustomDomain ? `/${p}` : `/c/${slug}${p ? '/' + p : ''}`);
 
     function classesHtml(c: Site) {
       return (c.classes ?? []).length
@@ -117,6 +120,10 @@ import AppLayout from '../layouts/AppLayout.astro';
     }
 
     async function render() {
+      if (!slug && onCustomDomain) {
+        const { data: resolved } = await supabase.rpc('resolve_club_domain', { p_host: location.hostname });
+        if (resolved) slug = resolved;
+      }
       if (!slug) {
         portal.innerHTML = '<p class="text-center text-mist-500">No club specified.</p>';
         return;

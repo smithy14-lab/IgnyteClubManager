@@ -22,16 +22,18 @@ import AppLayout from '../../layouts/AppLayout.astro';
       contact_email: string | null; created_at: string; families: number; coaches: number;
       pending: number; bookings_per_week: number; last_booking_at: string | null;
     };
-    let addonsByClub: Record<string, string[]> = {};
+    let extraByClub: Record<string, { addons: string[]; custom_domain: string | null; custom_domain_status: string | null; mailbox_alias: string | null }> = {};
 
     async function render() {
       const [{ data: health }, { data: leads }, { data: audit }, { data: addonRows }] = await Promise.all([
         supabase.rpc('owner_club_health'),
         supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(30),
         supabase.from('owner_audit').select('*').order('created_at', { ascending: false }).limit(15),
-        supabase.from('clubs').select('id, addons'),
+        supabase.from('clubs').select('id, addons, custom_domain, custom_domain_status, mailbox_alias'),
       ]);
-      addonsByClub = Object.fromEntries((addonRows ?? []).map((r) => [r.id, r.addons ?? []]));
+      extraByClub = Object.fromEntries(
+        (addonRows ?? []).map((r) => [r.id, { addons: r.addons ?? [], custom_domain: r.custom_domain, custom_domain_status: r.custom_domain_status, mailbox_alias: r.mailbox_alias }])
+      );
       const clubs = (health ?? []) as Club[];
       const liveClubs = clubs.filter((c) => c.status === 'active');
 
@@ -73,16 +75,27 @@ import AppLayout from '../../layouts/AppLayout.astro';
                 <div class="flex gap-1.5 items-center flex-wrap">
                   <span class="${statusPill[c.status] ?? 'pill'}">${c.status}</span>
                   <select class="field !w-auto !py-1 !text-xs" data-plan="${c.id}">
-                    ${['free', 'privates', 'club', 'comped'].map((pl) => `<option value="${pl}" ${pl === c.plan ? 'selected' : ''}>${pl}</option>`).join('')}
+                    ${['free', 'small', 'club', 'comped'].map((pl) => `<option value="${pl}" ${pl === c.plan ? 'selected' : ''}>${pl}</option>`).join('')}
                   </select>
                   <select class="field !w-auto !py-1 !text-xs" data-status="${c.id}">
                     ${['active', 'suspended', 'churned'].map((st) => `<option value="${st}" ${st === c.status ? 'selected' : ''}>${st}</option>`).join('')}
                   </select>
-                  <button class="btn btn-ghost btn-sm ${(addonsByClub[c.id] ?? []).includes('website') ? '!text-ignite-400' : ''}"
-                    data-addon="${c.id}" title="Toggle the Website add-on (for Free/Privates clubs)">🌐</button>
+                  <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('privates') ? '!text-ignite-400' : ''}"
+                    data-addon="privates:${c.id}" title="Toggle the Privates add-on (£10/mo)">⚡</button>
+                  <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('websitepro') ? '!text-ignite-400' : ''}"
+                    data-addon="websitepro:${c.id}" title="Toggle the Website Pro add-on (£10/mo)">🌐</button>
                   <button class="btn btn-ghost btn-sm" data-viewas="${c.id}" data-name="${esc(c.name)}">View as admin</button>
                 </div>
               </div>
+              ${
+                extraByClub[c.id]?.custom_domain
+                  ? `<p class="text-xs mt-1.5 ${extraByClub[c.id].custom_domain_status === 'live' ? 'text-mist-400' : 'text-charge-400'}">
+                      🌐 ${esc(extraByClub[c.id].custom_domain!)}${extraByClub[c.id].mailbox_alias ? ' · 📧 ' + esc(extraByClub[c.id].mailbox_alias!) + '@' + esc(extraByClub[c.id].custom_domain!) : ''}
+                      · ${extraByClub[c.id].custom_domain_status}
+                      ${extraByClub[c.id].custom_domain_status === 'requested' ? `<button class="btn btn-ghost btn-sm ml-1" data-domainlive="${c.id}">Mark live</button>` : ''}
+                    </p>`
+                  : ''
+              }
             </div>`;
             })
             .join('')}
@@ -161,12 +174,21 @@ import AppLayout from '../../layouts/AppLayout.astro';
       );
       content.querySelectorAll<HTMLButtonElement>('[data-addon]').forEach((b) =>
         b.addEventListener('click', async () => {
-          const id = b.dataset.addon!;
-          const current = addonsByClub[id] ?? [];
-          const next = current.includes('website') ? current.filter((a) => a !== 'website') : [...current, 'website'];
+          const [addon, id] = b.dataset.addon!.split(':');
+          const current = extraByClub[id]?.addons ?? [];
+          const next = current.includes(addon) ? current.filter((a) => a !== addon) : [...current, addon];
           const { error } = await supabase.rpc('owner_set_addons', { p_club: id, p_addons: next });
           if (error) return toast(errMsg(error), 'err');
-          toast(next.includes('website') ? 'Website add-on ON.' : 'Website add-on off.');
+          toast(`${addon} add-on ${next.includes(addon) ? 'ON' : 'off'}.`);
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-domainlive]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Mark this domain live? Only do this after the Cloudflare custom hostname + email routing are set up.')) return;
+          const { error } = await supabase.rpc('owner_set_domain_status', { p_club: b.dataset.domainlive, p_status: 'live' });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Domain live. 🌐');
           render();
         })
       );

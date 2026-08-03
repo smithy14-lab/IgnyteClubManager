@@ -25,9 +25,10 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     async function render() {
       const club = ctx.club!;
-      const [{ data: pages }, { data: enquiries }] = await Promise.all([
+      const [{ data: pages }, { data: enquiries }, { data: clubRow }] = await Promise.all([
         supabase.from('club_pages').select('*').eq('club_id', club.id).order('sort').order('title'),
         supabase.from('club_enquiries').select('*').eq('club_id', club.id).order('created_at', { ascending: false }).limit(40),
+        supabase.from('clubs').select('custom_domain, custom_domain_status, mailbox_alias').eq('id', club.id).single(),
       ]);
 
       const pageCard = (p?: { id?: string; slug?: string; title?: string; body?: string; sort?: number; published?: boolean }) => `
@@ -54,6 +55,21 @@ import AppLayout from '../../layouts/AppLayout.astro';
             <p class="text-xs text-mist-500 mt-1">Home, Classes, Contact and coach list are built in — your pages appear in the menu automatically. Branding colours come from Admin → Branding.</p>
           </div>
           <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="/c/${esc(club.slug)}">Preview ↗</a>
+        </div>
+
+        <div class="surface-card p-5 mb-5">
+          <p class="text-sm font-semibold">🌐 Your own domain &amp; mailbox
+            ${clubRow?.custom_domain ? `<span class="pill ${clubRow.custom_domain_status === 'live' ? 'pill-success' : 'pill-warn'}">${esc(clubRow.custom_domain)} · ${clubRow.custom_domain_status}</span>` : '<span class="pill">Website Pro / Club plan</span>'}</p>
+          ${
+            clubRow?.custom_domain
+              ? `<p class="text-xs text-mist-500 mt-1.5">${clubRow.custom_domain_status === 'live' ? `Your site answers at <b>https://${esc(clubRow.custom_domain)}</b>${clubRow.mailbox_alias ? ` and mail to <b>${esc(clubRow.mailbox_alias)}@${esc(clubRow.custom_domain)}</b> reaches you` : ''}. 🎉` : 'Requested — Ignyte is wiring it up. You\'ll be told the DNS records to set at your registrar.'}</p>`
+              : `<p class="text-xs text-mist-500 mt-1.5 mb-2">Run this site at your own address (e.g. <b>yourclub.co.uk</b>) with a club mailbox (e.g. <b>hello@yourclub.co.uk</b>). You buy the domain (~£10/yr at any registrar); we do the rest.</p>
+                <div class="flex flex-wrap gap-2">
+                  <input class="field !w-auto flex-1" id="dom-name" placeholder="yourclub.co.uk" />
+                  <input class="field !w-32" id="dom-mail" placeholder="hello" title="mailbox name" />
+                  <button class="btn btn-primary btn-sm" id="dom-go">Request domain</button>
+                </div>`
+          }
         </div>
 
         <div class="grid gap-5 lg:grid-cols-2 items-start">
@@ -93,6 +109,15 @@ import AppLayout from '../../layouts/AppLayout.astro';
           </div>
         </div>`;
 
+      document.getElementById('dom-go')?.addEventListener('click', async () => {
+        const domain = (document.getElementById('dom-name') as HTMLInputElement).value.trim();
+        const mail = (document.getElementById('dom-mail') as HTMLInputElement).value.trim();
+        if (!domain) return toast('Enter your domain first.', 'err');
+        const { error } = await supabase.rpc('admin_request_domain', { p_club: club.id, p_domain: domain, p_mailbox: mail || null });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Requested — Ignyte will wire it up and let you know the DNS records. 🌐');
+        render();
+      });
       content.querySelectorAll<HTMLButtonElement>('[data-save]').forEach((b) =>
         b.addEventListener('click', async () => {
           const card = b.closest('[data-pagecard]')!;
