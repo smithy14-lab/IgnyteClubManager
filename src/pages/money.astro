@@ -191,7 +191,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       );
     }
 
-    async function payApi(body: Record<string, unknown>): Promise<{ url?: string; paid?: boolean; error?: string }> {
+    async function payApi(body: Record<string, unknown>): Promise<{ url?: string; paid?: boolean; processing?: boolean; error?: string }> {
       const { data: s } = await supabase.auth.getSession();
       const res = await fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/pay`, {
         method: 'POST',
