@@ -22,7 +22,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     async function render() {
       const club = ctx.club!;
       const me = ctx.profile.id;
-      const [{ data: settings }, { data: invoices }, { data: ledger }, { data: mems }, { data: plans }, athletes] =
+      const [{ data: settings }, { data: invoices }, { data: ledger }, { data: mems }, { data: plans }, athletes, { data: saved }] =
         await Promise.all([
           supabase.from('club_settings').select('currency, payment_instructions, payment_link_url, card_payments_enabled').eq('club_id', club.id).single(),
           supabase.from('invoices').select('*').eq('club_id', club.id).eq('profile_id', me).order('created_at', { ascending: false }).limit(60),
@@ -30,6 +30,7 @@ import AppLayout from '../layouts/AppLayout.astro';
           supabase.from('memberships').select('id, status, started_on, athlete_id, payer_id, athletes(name), membership_plans(name, monthly_fee, classes_per_week, private_credits_per_month)').eq('club_id', club.id),
           supabase.from('membership_plans').select('*').eq('club_id', club.id).eq('active', true).order('monthly_fee'),
           myAthletes(club.id),
+          supabase.from('club_customers').select('method_label, auto_pay').eq('club_id', club.id).eq('profile_id', ctx.profile.id).maybeSingle(),
         ]);
 
       const sym = settings?.currency ?? '£';
@@ -94,6 +95,23 @@ import AppLayout from '../layouts/AppLayout.astro';
             : '<div class="surface-card p-5 mb-5"><p class="text-sm text-mist-300">✅ Nothing to pay — you\'re all square.</p></div>'
         }
 
+        ${
+          settings?.card_payments_enabled
+            ? `<div class="surface-card p-5 mb-5">
+          <h2 class="text-base font-semibold mb-1">⚙️ Auto-pay</h2>
+          ${
+            saved?.method_label
+              ? `<p class="text-xs text-mist-400 mb-2">Saved: <b>${esc(saved.method_label)}</b> — due invoices ${saved.auto_pay ? 'pay themselves on the day' : 'wait for you (auto-pay is off)'}.</p>
+                 <div class="flex gap-2">
+                   <button class="btn btn-ghost btn-sm" id="ap-toggle">${saved.auto_pay ? 'Turn auto-pay off' : 'Turn auto-pay on'}</button>
+                   <button class="btn btn-ghost btn-sm" id="ap-setup">Change method</button>
+                 </div>`
+              : `<p class="text-xs text-mist-500 mb-2">Save a card or Direct Debit once and your invoices pay themselves when due — no more remembering.</p>
+                 <button class="btn btn-primary btn-sm" id="ap-setup">Set up auto-pay</button>`
+          }
+        </div>`
+            : ''
+        }
         <div class="surface-card p-5 mb-5">
           <h2 class="text-base font-semibold mb-3">🏅 Memberships</h2>
           ${
@@ -158,7 +176,30 @@ import AppLayout from '../layouts/AppLayout.astro';
             .join('')}
         </div>`
             : ''
-        }`;
+        }
+        <label class="text-xs text-mist-500 flex gap-2 items-center mt-5">
+          <input type="checkbox" id="email-toggle" ${(ctx.profile as unknown as { email_notifications?: boolean }).email_notifications !== false ? 'checked' : ''} />
+          📧 Email me about invoices, bookings &amp; club news
+        </label>`;
+
+      document.getElementById('ap-setup')?.addEventListener('click', async () => {
+        const res = await payApi({ action: 'setup', club_id: club.id, return_url: location.origin + '/money' });
+        if (res.error || !res.url) return toast(res.error ?? 'Auto-pay is unavailable right now.', 'err');
+        location.href = res.url;
+      });
+      document.getElementById('ap-toggle')?.addEventListener('click', async () => {
+        const { error } = await supabase.rpc('set_auto_pay', { p_club: club.id, p_on: !saved?.auto_pay });
+        if (error) return toast(errMsg(error), 'err');
+        toast(saved?.auto_pay ? 'Auto-pay off.' : 'Auto-pay on — due invoices will collect themselves. ⚙️');
+        render();
+      });
+      document.getElementById('email-toggle')?.addEventListener('change', async (ev) => {
+        const on = (ev.target as HTMLInputElement).checked;
+        const { error } = await supabase.from('profiles').update({ email_notifications: on }).eq('id', ctx.profile.id);
+        if (error) return toast(errMsg(error), 'err');
+        (ctx.profile as unknown as { email_notifications?: boolean }).email_notifications = on;
+        toast(on ? 'Emails on.' : 'Emails off — notifications stay in the app.');
+      });
 
       document.getElementById('mem-start')?.addEventListener('click', async () => {
         const plan = (document.getElementById('mem-plan') as HTMLSelectElement).value;
@@ -191,7 +232,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       );
     }
 
-    async function payApi(body: Record<string, unknown>): Promise<{ url?: string; paid?: boolean; processing?: boolean; error?: string }> {
+    async function payApi(body: Record<string, unknown>): Promise<{ url?: string; paid?: boolean; processing?: boolean; saved?: boolean; label?: string; error?: string }> {
       const { data: s } = await supabase.auth.getSession();
       const res = await fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/pay`, {
         method: 'POST',
@@ -207,6 +248,14 @@ import AppLayout from '../layouts/AppLayout.astro';
 
     async function confirmCardReturn() {
       const params = new URLSearchParams(location.search);
+      const setupId = params.get('setup');
+      if (setupId) {
+        history.replaceState(null, '', '/money');
+        const res = await payApi({ action: 'setup_confirm', club_id: ctx.club!.id, session_id: setupId });
+        if (res.saved) toast(`Auto-pay ready — ${res.label ?? 'method saved'}. ⚙️`);
+        else if (res.error) toast(res.error, 'err');
+        return;
+      }
       const sessionId = params.get('paid');
       const inv = params.get('inv');
       if (!sessionId || !inv) return;

@@ -30,6 +30,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       coaches: { name: string; disciplines: string[] | null; levels: string | null }[];
       upcoming_slots: number; locations: string[];
       shop?: { name: string; description: string | null; price: number; options: string[]; image_url: string | null; in_stock: boolean }[];
+      events?: { name: string; description: string | null; event_date: string; start_time: string | null; fee: number | null }[];
       classes?: { name: string; discipline: string; day_of_week: number; start_time: string; end_time: string;
         age_min: number | null; age_max: number | null; monthly_fee: number | null;
         price_per_session: number | null; trial_allowed: boolean }[];
@@ -41,6 +42,7 @@ import AppLayout from '../layouts/AppLayout.astro';
         s
           .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
           .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+          .replace(/!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)/g, '<img src="$2" alt="$1" class="rounded-lg my-2 max-w-full" loading="lazy" />')
           .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a class="text-ignite-400 underline" href="$2" target="_blank" rel="noopener">$1</a>');
       const blocks = esc(src).replace(/\r/g, '').split(/\n{2,}/);
       return blocks
@@ -128,6 +130,23 @@ import AppLayout from '../layouts/AppLayout.astro';
         : '';
     }
 
+    function eventsHtml(c: Site) {
+      return (c.events ?? []).length
+        ? `<div class="surface-card p-5 mt-4">
+            <p class="text-sm font-semibold mb-2">🎪 Coming up</p>
+            ${(c.events ?? [])
+              .map(
+                (e) => `<div class="py-1.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
+                  <p class="text-sm">${esc(e.name)}
+                    <span class="text-xs text-mist-500">· ${new Date(e.event_date + 'T00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}${e.start_time ? ' ' + e.start_time.slice(0, 5) : ''}</span></p>
+                  ${Number(e.fee) > 0 ? `<span class="text-sm">£${Number(e.fee).toFixed(2)}</span>` : ''}
+                </div>`
+              )
+              .join('')}
+          </div>`
+        : '';
+    }
+
     function contactHtml(c: Site) {
       return `<div class="surface-card p-5 mt-4">
         <p class="text-sm font-semibold mb-2">📬 Ask ${esc(c.name)} anything</p>
@@ -190,7 +209,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
       if (!siteMode) {
         portal.innerHTML =
-          hero + bookCallout + classesHtml(c) + shopHtml(c) + coachesHtml(c) + contactHtml(c) + joinHtml(c, signedIn);
+          hero + bookCallout + classesHtml(c) + eventsHtml(c) + shopHtml(c) + coachesHtml(c) + contactHtml(c) + joinHtml(c, signedIn);
       } else {
         const navItems: [string, string][] = [
           ['Home', ''],
@@ -215,7 +234,7 @@ import AppLayout from '../layouts/AppLayout.astro';
         else if (pageSlug === 'coaches') bodyHtml = coachesHtml(c) || '<p class="text-sm text-mist-500 mt-4">Coach profiles coming soon.</p>';
         else if (pageSlug === 'contact') bodyHtml = contactHtml(c);
         else if (page) bodyHtml = `<div class="surface-card p-6 mt-4 text-left">${md(page.body)}</div>`;
-        else bodyHtml = bookCallout + classesHtml(c) + coachesHtml(c) + joinHtml(c, signedIn); // home
+        else bodyHtml = bookCallout + classesHtml(c) + eventsHtml(c) + coachesHtml(c) + joinHtml(c, signedIn); // home
 
         portal.innerHTML = hero + nav + bodyHtml;
       }

@@ -29,6 +29,8 @@ const appNav: [string, string, string][] = [
   ['📅 My bookings', '/bookings', 'parent,athlete'],
   ['💳 Money', '/money', 'parent,athlete'],
   ['🛍️ Shop', '/shop', 'parent,athlete,coach'],
+  ['🎪 Events', '/events', 'parent,athlete'],
+  ['📜 Waiver', '/waiver', 'parent,athlete'],
   ['🧒 Athletes', '/athletes', 'parent'],
   ['🔥 Skill journey', '/progress', 'parent,athlete'],
   ['📣 Coaching hub', '/coach', 'coach'],
@@ -273,6 +275,29 @@ const appNav: [string, string, string][] = [
             return;
           }
           const uid = data.session.user.id;
+
+          // background pumps: drain pending emails + auto-collect due invoices.
+          // Both edge functions self-rate-limit (2 min) and no-op when unset.
+          const pumpLast = Number(sessionStorage.getItem('icm-pump') ?? 0);
+          if (Date.now() - pumpLast > 5 * 60 * 1000) {
+            sessionStorage.setItem('icm-pump', String(Date.now()));
+            const pumpHeaders = {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${data.session.access_token}`,
+              apikey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+            };
+            for (const [fn, body] of [
+              ['send-emails', {}],
+              ['pay', { action: 'autocollect' }],
+            ] as const) {
+              fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/${fn}`, {
+                method: 'POST',
+                headers: pumpHeaders,
+                body: JSON.stringify(body),
+              }).catch(() => {});
+            }
+          }
+
           const [{ data: profile }, { data: mships }] = await Promise.all([
             supabase.from('profiles').select('role, last_club_id').eq('id', uid).single(),
             supabase

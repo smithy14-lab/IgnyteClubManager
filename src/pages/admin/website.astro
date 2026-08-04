@@ -25,11 +25,14 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     async function render() {
       const club = ctx.club!;
-      const [{ data: pages }, { data: enquiries }, { data: clubRow }] = await Promise.all([
+      const [{ data: pages }, { data: enquiries }, { data: clubRow }, { data: waiverSettings }, { data: sigs }] = await Promise.all([
         supabase.from('club_pages').select('*').eq('club_id', club.id).order('sort').order('title'),
         supabase.from('club_enquiries').select('*').eq('club_id', club.id).order('created_at', { ascending: false }).limit(40),
         supabase.from('clubs').select('custom_domain, custom_domain_status, mailbox_alias, starter_status').eq('id', club.id).single(),
+        supabase.from('club_settings').select('waiver_text, waiver_updated_at').eq('club_id', club.id).single(),
+        supabase.from('waiver_signatures').select('signed_name, signed_at, waiver_version').eq('club_id', club.id).order('signed_at', { ascending: false }).limit(200),
       ]);
+      const currentSigs = (sigs ?? []).filter((s) => s.waiver_version === waiverSettings?.waiver_updated_at);
 
       const pageCard = (p?: { id?: string; slug?: string; title?: string; body?: string; sort?: number; published?: boolean }) => `
         <div class="surface-card p-5 mb-4" data-pagecard="${p?.slug ?? ''}">
@@ -83,6 +86,27 @@ import AppLayout from '../../layouts/AppLayout.astro';
           }
         </div>
 
+        <div class="surface-card p-5 mb-5">
+          <p class="text-sm font-semibold mb-1">📜 Waiver &amp; consent
+            ${waiverSettings?.waiver_updated_at ? `<span class="pill pill-success">${currentSigs.length} signed this version</span>` : '<span class="pill">not set</span>'}</p>
+          <p class="text-xs text-mist-500 mb-2">Members sign by typing their name. Changing the text asks everyone to re-sign (they're notified).</p>
+          <textarea class="field" id="wv-text" rows="4" placeholder="Your terms, photo consent, code of conduct…">${esc(waiverSettings?.waiver_text ?? '')}</textarea>
+          <div class="flex items-center gap-2 mt-2 flex-wrap">
+            <button class="btn btn-primary btn-sm" id="wv-save">Publish waiver</button>
+            ${currentSigs.length ? `<span class="text-xs text-mist-500">Latest: ${currentSigs.slice(0, 5).map((s) => esc(s.signed_name)).join(', ')}${currentSigs.length > 5 ? '…' : ''}</span>` : ''}
+          </div>
+        </div>
+
+        <div class="surface-card p-5 mb-5">
+          <p class="text-sm font-semibold mb-1">🖼️ Images</p>
+          <p class="text-xs text-mist-500 mb-2">Upload a photo, get a link — paste it into pages as <code>![photo](link)</code> or into shop items.</p>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input type="file" id="img-file" accept="image/*" class="text-xs text-mist-400" />
+            <button class="btn btn-ghost btn-sm" id="img-up">Upload</button>
+            <input class="field flex-1" id="img-url" readonly placeholder="Your image link appears here" />
+          </div>
+        </div>
+
         <div class="grid gap-5 lg:grid-cols-2 items-start">
           <div>
             <h2 class="text-base font-semibold mb-3">📄 Pages</h2>
@@ -120,6 +144,25 @@ import AppLayout from '../../layouts/AppLayout.astro';
           </div>
         </div>`;
 
+      document.getElementById('wv-save')?.addEventListener('click', async () => {
+        const text = (document.getElementById('wv-text') as HTMLTextAreaElement).value;
+        if (text.trim() && !confirm('Publish this waiver? Every family will be asked to sign it.')) return;
+        const { error } = await supabase.rpc('update_club_waiver', { p_club: club.id, p_text: text });
+        if (error) return toast(errMsg(error), 'err');
+        toast(text.trim() ? 'Waiver published — members notified to sign.' : 'Waiver removed.');
+        render();
+      });
+      document.getElementById('img-up')?.addEventListener('click', async () => {
+        const file = (document.getElementById('img-file') as HTMLInputElement).files?.[0];
+        if (!file) return toast('Pick an image first.', 'err');
+        if (file.size > 4 * 1024 * 1024) return toast('Keep images under 4MB.', 'err');
+        const path = `${club.id}/site/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+        const { error } = await supabase.storage.from('club-media').upload(path, file, { upsert: false });
+        if (error) return toast(errMsg(error), 'err');
+        const { data: pub } = supabase.storage.from('club-media').getPublicUrl(path);
+        (document.getElementById('img-url') as HTMLInputElement).value = pub.publicUrl;
+        toast('Uploaded — link ready to copy. 🖼️');
+      });
       document.getElementById('starter-go')?.addEventListener('click', async () => {
         if (!confirm('Request the £299 Starter Package? Ignyte will contact you to kick off — payment is arranged directly, nothing is charged here.')) return;
         const { error } = await supabase.rpc('request_starter_package', { p_club: club.id });
