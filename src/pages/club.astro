@@ -22,11 +22,12 @@ import AppLayout from '../layouts/AppLayout.astro';
     // Custom club domain: the host IS the club; the path is the page.
     const onCustomDomain = !slug && !/workers\.dev$|^localhost$|^127\./.test(location.hostname);
     if (onCustomDomain) pageSlug = location.pathname.replaceAll('/', '');
+    if (pageSlug === 'signup') pageSlug = 'join';
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     type Site = {
       name: string; slug: string; blurb: string | null; accent_color: string | null;
-      website: boolean; pages: { slug: string; title: string; body: string }[];
+      website: boolean; open_join?: boolean; pages: { slug: string; title: string; body: string }[];
       coaches: { name: string; disciplines: string[] | null; levels: string | null }[];
       upcoming_slots: number; locations: string[];
       shop?: { name: string; description: string | null; price: number; options: string[]; image_url: string | null; in_stock: boolean }[];
@@ -100,14 +101,87 @@ import AppLayout from '../layouts/AppLayout.astro';
     function joinHtml(c: Site, signedIn: boolean) {
       return `<div class="surface-card p-5 mt-4">
         <p class="text-sm font-semibold mb-2">Join ${esc(c.name)}</p>
-        <p class="text-xs text-mist-500 mb-3">Have the club's code? You're in instantly. Otherwise send a join request and the club will approve you.</p>
-        <div class="flex gap-2 mb-3">
-          <input class="field flex-1 uppercase" id="p-code" maxlength="6" placeholder="Club code (optional)" />
-          <button class="btn btn-primary" id="p-join">Join</button>
-        </div>
-        ${signedIn ? '' : `<p class="text-xs text-mist-500">You'll create your (free) family account first — takes a minute.</p>`}
-        <a href="/login" class="text-xs text-ignite-400 ${signedIn ? 'hidden' : ''}">Already have an account? Sign in</a>
+        <p class="text-xs text-mist-500 mb-3">${c.open_join !== false ? 'Sign up and you\'re in — book, enrol and shop straight away.' : 'Sign up and the club will approve you — usually the same day.'}</p>
+        ${
+          signedIn
+            ? `<button class="btn btn-primary" id="p-join">Join this club</button>
+               <div class="mt-3 flex gap-2"><input class="field flex-1 uppercase" id="p-code" maxlength="6" placeholder="Club code (optional)" /></div>`
+            : `<div class="flex flex-wrap gap-2">
+                <a href="${link('join')}" class="btn btn-primary">Join online — free account</a>
+                <a href="${link('login')}" class="btn btn-ghost">Member sign in</a>
+              </div>`
+        }
       </div>`;
+    }
+
+    function authHtml(c: Site, mode: 'login' | 'join') {
+      return `<div class="surface-card p-6 mt-4 max-w-md mx-auto">
+        <h2 class="text-lg font-semibold mb-1">${mode === 'login' ? `Sign in to ${esc(c.name)}` : `Join ${esc(c.name)}`}</h2>
+        <p class="text-xs text-mist-500 mb-4">${
+          mode === 'login'
+            ? 'Your one Ignyte login works for every club you belong to.'
+            : c.open_join !== false
+              ? 'Free family account — you\'re in the club the moment you sign up.'
+              : 'Free family account — the club approves new members, usually the same day.'
+        }</p>
+        <form id="auth-form" class="flex flex-col gap-3">
+          ${mode === 'join' ? `
+          <div><label class="form-label">Your name</label><input class="field" id="a-name" required autocomplete="name" /></div>
+          <div><label class="form-label">Phone (optional)</label><input class="field" id="a-phone" type="tel" autocomplete="tel" /></div>` : ''}
+          <div><label class="form-label">Email</label><input class="field" id="a-email" type="email" required autocomplete="email" /></div>
+          <div><label class="form-label">Password</label><input class="field" id="a-pw" type="password" minlength="8" required autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" /></div>
+          <button class="btn btn-primary w-full" type="submit">${mode === 'login' ? 'Sign in' : c.open_join !== false ? 'Create account & join' : 'Create account & request to join'}</button>
+        </form>
+        <p class="text-xs text-mist-500 mt-4">
+          ${mode === 'login'
+            ? `New here? <a class="text-ignite-400" href="${link('join')}">Join ${esc(c.name)}</a>`
+            : `Already have an account? <a class="text-ignite-400" href="${link('login')}">Sign in</a>`}
+        </p>
+      </div>`;
+    }
+
+    async function activateAndGo(c: Site) {
+      const { data: clubRow } = await supabase.from('clubs').select('id').eq('slug', c.slug).maybeSingle();
+      if (clubRow) await setActiveClub(clubRow.id);
+      location.href = '/dashboard';
+    }
+
+    function wireAuth(c: Site, mode: 'login' | 'join') {
+      document.getElementById('auth-form')?.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const email = (document.getElementById('a-email') as HTMLInputElement).value.trim();
+        const pw = (document.getElementById('a-pw') as HTMLInputElement).value;
+        try {
+          if (mode === 'login') {
+            const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+            if (error) throw error;
+            toast(`Welcome back! 🔥`);
+            await activateAndGo(c);
+            return;
+          }
+          const { data, error } = await supabase.auth.signUp({
+            email,
+            password: pw,
+            options: {
+              data: {
+                full_name: (document.getElementById('a-name') as HTMLInputElement).value.trim(),
+                phone: (document.getElementById('a-phone') as HTMLInputElement).value.trim() || undefined,
+                join_slug: c.slug,
+              },
+            },
+          });
+          if (error) throw error;
+          if (data.session) {
+            toast(c.open_join !== false ? `Welcome to ${c.name}! 🎉` : 'Account created — the club will approve you shortly.');
+            await activateAndGo(c);
+          } else {
+            (document.getElementById('auth-form') as HTMLFormElement).outerHTML =
+              '<p class="text-sm text-mist-300">📧 Check your email to confirm your account, then sign in here — your club membership is already set up.</p>';
+          }
+        } catch (e) {
+          toast(errMsg(e), 'err');
+        }
+      });
     }
 
     function shopHtml(c: Site) {
@@ -207,6 +281,14 @@ import AppLayout from '../layouts/AppLayout.astro';
           <p class="text-xs text-mist-500 mt-1">${c.upcoming_slots} slot${c.upcoming_slots === 1 ? '' : 's'} open in the next two weeks.</p>
         </div>`;
 
+      // Branded front door: works with or without the full site.
+      if (pageSlug === 'login' || pageSlug === 'join') {
+        const mode = pageSlug as 'login' | 'join';
+        portal.innerHTML = hero + authHtml(c, mode);
+        wireAuth(c, mode);
+        return;
+      }
+
       if (!siteMode) {
         portal.innerHTML =
           hero + bookCallout + classesHtml(c) + eventsHtml(c) + shopHtml(c) + coachesHtml(c) + contactHtml(c) + joinHtml(c, signedIn);
@@ -217,6 +299,7 @@ import AppLayout from '../layouts/AppLayout.astro';
           ['Classes', 'classes'],
           ...((c.shop ?? []).length ? [['Shop', 'shop'] as [string, string]] : []),
           ['Contact', 'contact'],
+          ...(signedIn ? [] : [['Sign in', 'login'] as [string, string]]),
         ];
         const nav = `<nav class="flex flex-wrap gap-1.5 justify-center mt-6 mb-2">
           ${navItems
@@ -250,11 +333,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       });
 
       document.getElementById('p-join')?.addEventListener('click', async () => {
-        const code = (document.getElementById('p-code') as HTMLInputElement).value.trim();
-        if (!signedIn) {
-          location.href = `/signup?club=${encodeURIComponent(c.slug)}${code ? `&code=${encodeURIComponent(code)}` : ''}`;
-          return;
-        }
+        const code = ((document.getElementById('p-code') as HTMLInputElement | null)?.value ?? '').trim();
         try {
           if (code) {
             const { data: res, error } = await supabase.rpc('join_by_code', { p_code: code });

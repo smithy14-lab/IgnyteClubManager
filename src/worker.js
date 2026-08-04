@@ -15,7 +15,8 @@ export default {
     // asset paths pass through untouched.
     if (!PLATFORM_HOSTS.includes(url.hostname) && /^\/([a-z0-9-]+\/?)?$/.test(url.pathname)) {
       const seg = url.pathname.replaceAll('/', '');
-      const appPages = ['login', 'signup', 'dashboard', 'welcome', 'clubs', 'start', 'offline'];
+      // login/join/signup render the CLUB'S branded front door on its domain
+      const appPages = ['dashboard', 'welcome', 'clubs', 'start', 'offline'];
       if (!appPages.includes(seg)) {
         url.pathname = '/club/';
         return env.ASSETS.fetch(new Request(url.toString(), request));

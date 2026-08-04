@@ -29,7 +29,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         supabase.from('club_pages').select('*').eq('club_id', club.id).order('sort').order('title'),
         supabase.from('club_enquiries').select('*').eq('club_id', club.id).order('created_at', { ascending: false }).limit(40),
         supabase.from('clubs').select('custom_domain, custom_domain_status, mailbox_alias, starter_status').eq('id', club.id).single(),
-        supabase.from('club_settings').select('waiver_text, waiver_updated_at').eq('club_id', club.id).single(),
+        supabase.from('club_settings').select('waiver_text, waiver_updated_at, open_join').eq('club_id', club.id).single(),
         supabase.from('waiver_signatures').select('signed_name, signed_at, waiver_version').eq('club_id', club.id).order('signed_at', { ascending: false }).limit(200),
       ]);
       const currentSigs = (sigs ?? []).filter((s) => s.waiver_version === waiverSettings?.waiver_updated_at);
@@ -84,6 +84,19 @@ import AppLayout from '../../layouts/AppLayout.astro';
               : `<p class="text-xs text-mist-500 mt-1.5 mb-2">We do the whole setup with you: website built, domain & mailbox wired, Stripe connected, and your coaches, families & sessions migrated from your old system.</p>
                  <button class="btn btn-primary btn-sm" id="starter-go">Request the Starter Package</button>`
           }
+        </div>
+
+        <div class="surface-card p-5 mb-5">
+          <p class="text-sm font-semibold mb-1">🚪 Your front door</p>
+          <p class="text-xs text-mist-500 mb-2">
+            Families join at <b>/c/${esc(club.slug)}/join</b> and sign in at <b>/c/${esc(club.slug)}/login</b> —
+            both carry your branding (and work on your own domain as /join and /login).
+            The club code${(ctx.club as unknown as { join_code?: string }).join_code ? '' : ''} still works as a fallback for posters.
+          </p>
+          <label class="text-xs text-mist-300 flex gap-2 items-center">
+            <input type="checkbox" id="oj-toggle" ${waiverSettings?.open_join !== false ? 'checked' : ''} />
+            Instant joining — link sign-ups are members immediately (untick to approve each one in People)
+          </label>
         </div>
 
         <div class="surface-card p-5 mb-5">
@@ -144,6 +157,12 @@ import AppLayout from '../../layouts/AppLayout.astro';
           </div>
         </div>`;
 
+      document.getElementById('oj-toggle')?.addEventListener('change', async (ev) => {
+        const on = (ev.target as HTMLInputElement).checked;
+        const { error } = await supabase.rpc('set_open_join', { p_club: club.id, p_open: on });
+        if (error) return toast(errMsg(error), 'err');
+        toast(on ? 'Instant joining on.' : 'Approval mode on — new sign-ups wait in Admin → People.');
+      });
       document.getElementById('wv-save')?.addEventListener('click', async () => {
         const text = (document.getElementById('wv-text') as HTMLTextAreaElement).value;
         if (text.trim() && !confirm('Publish this waiver? Every family will be asked to sign it.')) return;
