@@ -5,7 +5,7 @@ import IgnyteMark from '../components/IgnyteMark.astro';
 const features = [
   ['🌐', 'A real club website — free', 'Pages you write yourself, an enquiry form that lands in your inbox, and a timetable that updates itself — because the site runs on your live club data. Upgrade to your own domain and club mailbox.'],
   ['🤸', 'Classes, trials & waiting lists', 'Weekly classes with age bands and capacity, free or paid taster sessions with automatic follow-ups, and waiting lists that promote the next family (siblings first) the moment a space opens.'],
-  ['⚡', '1-2-1 private lessons, booked in seconds', 'Live calendars of slots by coach, discipline and location. One-offs or weekly until cancelled — parents book at 10pm without a single WhatsApp.'],
+  ['⚡', 'Privates too, when you run them', 'An optional 1-2-1 module: live slot calendars by coach and discipline, one-offs or weekly — bolt it on only if your club offers privates.'],
   ['🔥', 'Skill journeys that sell themselves', 'Every session updates a visual progression: levels light up, badges land, and families get a "🎉 skill achieved!" the moment it happens. Progress parents can see is progress parents keep paying for.'],
   ['💷', 'Payments & memberships — 0% fees', 'Invoices, card & Direct Debit checkout on your own Stripe, memberships billed on your chosen day, late fees and chasing handled for you. Every penny goes to the club — no % cut, ever.'],
   ['🛍️', 'A club shop, built in — free', 'Kit, uniforms and merch with sizes and stock. Orders invoice themselves when payments are on, land on your website, and families collect at training.'],
@@ -14,12 +14,12 @@ const features = [
 
 const steps = [
   ['1', 'Claim your free website', 'Start your club, write your pages, share your link — your timetable and coaches are already on it.'],
-  ['2', 'Open classes & slots', 'Weekly classes for the squads, 1-2-1 slots for privates — coaches attach themselves with their rates.'],
+  ['2', 'Open your classes', 'Weekly classes for the squads with trials and waiting lists — coaches attach themselves with their rates.'],
   ['3', 'Families book, pay & watch', 'Enrolments, trials and lessons booked in seconds, paid online at 0% — and every skill journey lights up as they learn.'],
 ];
 ---
 
-<AppLayout title="Private lessons, powered up">
+<AppLayout title="The club platform for cheer & dance">
   <section class="min-h-[72dvh] flex flex-col items-center justify-center text-center pt-8 animate-rise">
     <IgnyteMark size={84} />
     <h1 class="mt-6 text-headline max-w-3xl">
@@ -27,8 +27,9 @@ const steps = [
     </h1>
     <p class="mt-5 max-w-xl text-mist-300 text-lg">
       Ignyte runs the whole cheer &amp; dance club: a free club website, group classes with
-      trials and waiting lists, 1-2-1 private lessons, memberships and 0%-fee payments —
-      wrapped around a skill progression families fall in love with.
+      trials and waiting lists, events, a club shop, memberships and 0%-fee payments —
+      wrapped around a skill progression families fall in love with. Privates? There's a
+      module for that too.
     </p>
     <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
       <a href="/start" class="btn btn-primary">Start your club — free</a>
@@ -66,7 +67,7 @@ const steps = [
 
   <section class="text-center pb-16">
     <div class="surface-card max-w-xl mx-auto p-8" style="box-shadow: var(--shadow-glow)">
-      <h2 class="text-xl">Ready to ignite your private lessons?</h2>
+      <h2 class="text-xl">Ready to ignite your club?</h2>
       <p class="mt-2 text-sm text-mist-400">Free for your first club, set up in minutes — upgrade only when you want your own branding.</p>
       <div class="mt-5 flex flex-wrap justify-center gap-3">
         <a href="/start" class="btn btn-primary">Start your club</a>
