@@ -8,10 +8,26 @@ import IgnyteMark from '../components/IgnyteMark.astro';
     <div class="text-center mb-6">
       <IgnyteMark size={48} />
       <h1 class="text-2xl mt-3">Start your club</h1>
-      <p class="text-sm text-mist-400 mt-1">Free to set up. You'll be taking bookings in minutes.</p>
+      <p class="text-sm text-mist-400 mt-1">Free to set up — website, classes and bookings in minutes.</p>
     </div>
 
     <form id="wizard" class="surface-card p-6 flex flex-col gap-4">
+      <div id="account-fields" class="hidden flex flex-col gap-4">
+        <p class="text-xs font-semibold uppercase tracking-widest text-mist-500">Your account</p>
+        <div>
+          <label class="form-label" for="w-yourname">Your name</label>
+          <input class="field" id="w-yourname" maxlength="60" autocomplete="name" placeholder="Alex Smith" />
+        </div>
+        <div>
+          <label class="form-label" for="w-email">Email</label>
+          <input class="field" id="w-email" type="email" autocomplete="email" placeholder="you@yourclub.co.uk" />
+        </div>
+        <div>
+          <label class="form-label" for="w-pw">Password</label>
+          <input class="field" id="w-pw" type="password" minlength="8" autocomplete="new-password" />
+        </div>
+        <p class="text-xs font-semibold uppercase tracking-widest text-mist-500 pt-2 border-t border-ink-700">Your club</p>
+      </div>
       <div>
         <label class="form-label" for="w-name">Club name</label>
         <input class="field" id="w-name" required maxlength="60" placeholder="e.g. Storm Allstars" />
@@ -22,7 +38,7 @@ import IgnyteMark from '../components/IgnyteMark.astro';
           <span>/c/</span>
           <input class="field flex-1" id="w-slug" required pattern="[a-z0-9][a-z0-9-]{1,28}[a-z0-9]" placeholder="storm-allstars" />
         </div>
-        <p class="text-xs text-mist-500 mt-1">Lowercase letters, numbers and dashes. This is the link you'll share with parents.</p>
+        <p class="text-xs text-mist-500 mt-1">Lowercase letters, numbers and dashes. This becomes your website &amp; sign-up link.</p>
       </div>
       <div>
         <label class="form-label">What do you coach?</label>
@@ -44,16 +60,33 @@ import IgnyteMark from '../components/IgnyteMark.astro';
           <option value="Australia/Sydney">Australia (Sydney)</option>
         </select>
       </div>
-      <button class="btn btn-primary" type="submit">Create my club</button>
+      <div>
+        <label class="form-label" for="w-promo">Discount code (optional)</label>
+        <input class="field uppercase" id="w-promo" maxlength="20" placeholder="e.g. CHEER50" />
+        <p class="text-xs mt-1 hidden" id="w-promo-msg"></p>
+      </div>
+      <button class="btn btn-primary" type="submit" id="w-go">Create my club</button>
+      <p class="text-xs text-mist-500 text-center hidden" id="w-signin-hint">
+        Already have an Ignyte account? <a href="/login" class="text-ignite-400">Sign in first</a> and come back.
+      </p>
     </form>
+
+    <div id="confirm-note" class="hidden surface-card p-6 text-center">
+      <p class="text-3xl">📧</p>
+      <h2 class="text-lg mt-2">Confirm your email</h2>
+      <p class="text-sm text-mist-400 mt-2">
+        We've saved your club details. Click the link in your email, sign in, and your club
+        will finish setting itself up automatically.
+      </p>
+    </div>
 
     <div id="done" class="hidden surface-card p-6 text-center" style="box-shadow: var(--shadow-glow)">
       <p class="text-3xl">🎉</p>
       <h2 class="text-lg mt-2">Your club is live!</h2>
       <div class="text-left mt-4 text-sm flex flex-col gap-2">
-        <p>📎 Share your portal link: <code id="d-link" class="text-ignite-400"></code></p>
-        <p>🔑 Instant-join code: <code id="d-code" class="text-ignite-400 text-lg"></code></p>
-        <p class="text-xs text-mist-500">Parents with the code join instantly; without it they request approval. Invite coaches from Admin → People.</p>
+        <p>🌐 Your website &amp; sign-up link: <code id="d-link" class="text-ignite-400"></code></p>
+        <p>🔑 Fallback join code: <code id="d-code" class="text-ignite-400 text-lg"></code></p>
+        <p class="text-xs text-mist-500">Families who sign up at your link join automatically. Invite coaches from Admin → Import.</p>
       </div>
       <a href="/admin" class="btn btn-primary mt-5">Open your admin</a>
     </div>
@@ -61,10 +94,14 @@ import IgnyteMark from '../components/IgnyteMark.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, setActiveClub, toast, errMsg } from '../lib/app';
+    import { setActiveClub, toast, errMsg } from '../lib/app';
 
     const nameEl = document.getElementById('w-name') as HTMLInputElement;
     const slugEl = document.getElementById('w-slug') as HTMLInputElement;
+    const promoEl = document.getElementById('w-promo') as HTMLInputElement;
+    const promoMsg = document.getElementById('w-promo-msg')!;
+    let signedIn = false;
+
     nameEl.addEventListener('input', () => {
       if (!slugEl.dataset.touched) {
         slugEl.value = nameEl.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
@@ -72,34 +109,105 @@ import IgnyteMark from '../components/IgnyteMark.astro';
     });
     slugEl.addEventListener('input', () => (slugEl.dataset.touched = '1'));
 
-    (document.getElementById('wizard') as HTMLFormElement).addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const disciplines = [
-        (document.getElementById('w-tumble') as HTMLInputElement).checked && 'tumble',
-        (document.getElementById('w-dance') as HTMLInputElement).checked && 'dance',
-      ].filter(Boolean);
-      if (!disciplines.length) return toast('Pick at least one discipline.', 'err');
+    promoEl.addEventListener('change', async () => {
+      const code = promoEl.value.trim();
+      promoMsg.classList.add('hidden');
+      if (!code) return;
+      const { data } = await supabase.rpc('check_promo', { p_code: code });
+      promoMsg.classList.remove('hidden');
+      if (data?.valid) {
+        promoMsg.className = 'text-xs mt-1 text-ignite-400';
+        promoMsg.textContent = `✓ ${data.percent_off}% off for ${data.duration_months} months${data.description ? ' — ' + data.description : ''}`;
+      } else {
+        promoMsg.className = 'text-xs mt-1 text-charge-400';
+        promoMsg.textContent = "That code isn't valid.";
+      }
+    });
+
+    type Pending = { name: string; slug: string; disciplines: string[]; location: string; timezone: string; promo: string | null };
+
+    async function provision(p: Pending) {
       const { data, error } = await supabase.rpc('provision_club', {
-        p_name: nameEl.value.trim(),
-        p_slug: slugEl.value.trim(),
-        p_timezone: (document.getElementById('w-tz') as HTMLSelectElement).value,
-        p_disciplines: disciplines,
-        p_location: (document.getElementById('w-loc') as HTMLInputElement).value.trim() || 'Main venue',
+        p_name: p.name, p_slug: p.slug, p_timezone: p.timezone,
+        p_disciplines: p.disciplines, p_location: p.location || 'Main venue',
+        p_promo: p.promo,
       });
       if (error) {
         const msg = errMsg(error);
-        return toast(msg.includes('duplicate') || msg.includes('unique') ? 'That link is taken — try another.' : msg, 'err');
+        throw new Error(msg.includes('duplicate') || msg.includes('unique') ? 'That link is taken — try another.' : msg);
       }
+      localStorage.removeItem('icm-pending-club');
       const res = data as { club_id: string; slug: string; join_code: string };
       await setActiveClub(res.club_id);
       document.getElementById('wizard')!.classList.add('hidden');
+      document.getElementById('confirm-note')!.classList.add('hidden');
       document.getElementById('d-link')!.textContent = `${location.origin}/c/${res.slug}`;
       document.getElementById('d-code')!.textContent = res.join_code;
       document.getElementById('done')!.classList.remove('hidden');
+    }
+
+    function readForm(): Pending {
+      const disciplines = [
+        (document.getElementById('w-tumble') as HTMLInputElement).checked && 'tumble',
+        (document.getElementById('w-dance') as HTMLInputElement).checked && 'dance',
+      ].filter(Boolean) as string[];
+      return {
+        name: nameEl.value.trim(),
+        slug: slugEl.value.trim(),
+        disciplines,
+        location: (document.getElementById('w-loc') as HTMLInputElement).value.trim(),
+        timezone: (document.getElementById('w-tz') as HTMLSelectElement).value,
+        promo: promoEl.value.trim() || null,
+      };
+    }
+
+    (document.getElementById('wizard') as HTMLFormElement).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const p = readForm();
+      if (!p.disciplines.length) return toast('Pick at least one discipline.', 'err');
+      try {
+        if (signedIn) return await provision(p);
+
+        // founder signup: account + club in one go
+        const yourName = (document.getElementById('w-yourname') as HTMLInputElement).value.trim();
+        const email = (document.getElementById('w-email') as HTMLInputElement).value.trim();
+        const pw = (document.getElementById('w-pw') as HTMLInputElement).value;
+        if (!yourName || !email || pw.length < 8) return toast('Fill in your name, email and a password (8+ characters).', 'err');
+        const { data, error } = await supabase.auth.signUp({
+          email, password: pw, options: { data: { full_name: yourName } },
+        });
+        if (error) throw error;
+        if (data.session) {
+          await provision(p);
+          toast('Welcome to Ignyte! 🎉');
+        } else {
+          localStorage.setItem('icm-pending-club', JSON.stringify(p));
+          document.getElementById('wizard')!.classList.add('hidden');
+          document.getElementById('confirm-note')!.classList.remove('hidden');
+        }
+      } catch (err) {
+        toast(errMsg(err), 'err');
+      }
     });
 
-    requireAuth().catch((e) => {
-      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
-    });
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      signedIn = Boolean(data.session);
+      if (!signedIn) {
+        document.getElementById('account-fields')!.classList.remove('hidden');
+        document.getElementById('w-signin-hint')!.classList.remove('hidden');
+        return;
+      }
+      // returning after email confirmation with a stashed club? finish the job.
+      const stash = localStorage.getItem('icm-pending-club');
+      if (stash) {
+        try {
+          await provision(JSON.parse(stash));
+          toast('Your club is live! 🎉');
+        } catch (err) {
+          toast(errMsg(err), 'err');
+        }
+      }
+    })();
   </script>
 </AppLayout>

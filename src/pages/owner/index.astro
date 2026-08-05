@@ -22,17 +22,18 @@ import AppLayout from '../../layouts/AppLayout.astro';
       contact_email: string | null; created_at: string; families: number; coaches: number;
       pending: number; bookings_per_week: number; last_booking_at: string | null;
     };
-    let extraByClub: Record<string, { addons: string[]; custom_domain: string | null; custom_domain_status: string | null; mailbox_alias: string | null; starter_status: string | null }> = {};
+    let extraByClub: Record<string, { addons: string[]; custom_domain: string | null; custom_domain_status: string | null; mailbox_alias: string | null; starter_status: string | null; promo_code: string | null }> = {};
 
     async function render() {
-      const [{ data: health }, { data: leads }, { data: audit }, { data: addonRows }] = await Promise.all([
+      const [{ data: health }, { data: leads }, { data: audit }, { data: addonRows }, { data: promos }] = await Promise.all([
         supabase.rpc('owner_club_health'),
         supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(30),
         supabase.from('owner_audit').select('*').order('created_at', { ascending: false }).limit(15),
-        supabase.from('clubs').select('id, addons, custom_domain, custom_domain_status, mailbox_alias, starter_status'),
+        supabase.from('clubs').select('id, addons, custom_domain, custom_domain_status, mailbox_alias, starter_status, promo_code'),
+        supabase.from('platform_promos').select('*').order('created_at', { ascending: false }),
       ]);
       extraByClub = Object.fromEntries(
-        (addonRows ?? []).map((r) => [r.id, { addons: r.addons ?? [], custom_domain: r.custom_domain, custom_domain_status: r.custom_domain_status, mailbox_alias: r.mailbox_alias, starter_status: r.starter_status }])
+        (addonRows ?? []).map((r) => [r.id, { addons: r.addons ?? [], custom_domain: r.custom_domain, custom_domain_status: r.custom_domain_status, mailbox_alias: r.mailbox_alias, starter_status: r.starter_status, promo_code: r.promo_code }])
       );
       const clubs = (health ?? []) as Club[];
       const liveClubs = clubs.filter((c) => c.status === 'active');
@@ -73,6 +74,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   </p>
                 </div>
                 <div class="flex gap-1.5 items-center flex-wrap">
+                  ${extraByClub[c.id]?.promo_code ? `<span class="pill pill-accent" title="Signed up with a promo code">🏷️ ${esc(extraByClub[c.id].promo_code!)}</span>` : ''}
                   <span class="${statusPill[c.status] ?? 'pill'}">${c.status}</span>
                   <select class="field !w-auto !py-1 !text-xs" data-plan="${c.id}">
                     ${['free', 'small', 'club', 'comped'].map((pl) => `<option value="${pl}" ${pl === c.plan ? 'selected' : ''}>${pl}</option>`).join('')}
@@ -143,6 +145,25 @@ import AppLayout from '../../layouts/AppLayout.astro';
           </div>
 
           <div>
+            <div class="surface-card p-5 mb-5">
+              <h2 class="text-base font-semibold mb-2">🏷️ Promo codes</h2>
+              ${(promos ?? [])
+                .map(
+                  (p) => `<div class="py-2 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2 text-sm ${p.active ? '' : 'opacity-50'}">
+                    <span><b>${esc(p.code)}</b> — ${p.percent_off}% × ${p.duration_months}mo
+                      <span class="text-xs text-mist-500">· used ${p.uses}${p.max_uses ? '/' + p.max_uses : ''}</span></span>
+                    <button class="btn btn-ghost btn-sm" data-promotoggle="${p.code}:${p.active ? '0' : '1'}">${p.active ? 'Off' : 'On'}</button>
+                  </div>`
+                )
+                .join('') || '<p class="text-sm text-mist-500">No codes yet.</p>'}
+              <div class="mt-3 pt-3 border-t border-ink-700 grid grid-cols-4 gap-1.5">
+                <input class="field uppercase col-span-2 !text-xs" id="pr-code" maxlength="20" placeholder="CHEER50" />
+                <input class="field !text-xs" id="pr-pct" type="number" min="1" max="100" placeholder="%" />
+                <input class="field !text-xs" id="pr-months" type="number" min="1" max="24" placeholder="months" value="3" />
+              </div>
+              <button class="btn btn-ghost btn-sm mt-2" id="pr-go">Add code</button>
+            </div>
+
             <div class="surface-card p-5 mb-5">
               <h2 class="text-base font-semibold mb-2">📣 Announce to all club admins</h2>
               <input class="field mb-2" id="an-title" placeholder="Title" />
@@ -222,6 +243,28 @@ import AppLayout from '../../layouts/AppLayout.astro';
       content.querySelectorAll<HTMLButtonElement>('[data-lead]').forEach((b) =>
         b.addEventListener('click', async () => {
           const { error } = await supabase.from('club_leads').update({ status: b.dataset.lead }).eq('id', b.dataset.id);
+          if (error) return toast(errMsg(error), 'err');
+          render();
+        })
+      );
+      document.getElementById('pr-go')?.addEventListener('click', async () => {
+        const code = (document.getElementById('pr-code') as HTMLInputElement).value.trim();
+        const pct = Number((document.getElementById('pr-pct') as HTMLInputElement).value);
+        const months = Number((document.getElementById('pr-months') as HTMLInputElement).value || 3);
+        if (!code || !pct) return toast('Code and % required.', 'err');
+        const { error } = await supabase.rpc('owner_save_promo', { p_code: code, p_percent: pct, p_months: months });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Promo live — share it. 🏷️');
+        render();
+      });
+      content.querySelectorAll<HTMLButtonElement>('[data-promotoggle]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [code, to] = b.dataset.promotoggle!.split(':');
+          const p = (promos ?? []).find((x) => x.code === code)!;
+          const { error } = await supabase.rpc('owner_save_promo', {
+            p_code: code, p_percent: p.percent_off, p_months: p.duration_months,
+            p_description: p.description, p_max_uses: p.max_uses, p_active: to === '1',
+          });
           if (error) return toast(errMsg(error), 'err');
           render();
         })
