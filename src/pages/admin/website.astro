@@ -239,7 +239,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         const { error } = await supabase.rpc('update_club_waiver', { p_club: club.id, p_text: text });
         if (error) return toast(errMsg(error), 'err');
         toast(text.trim() ? 'Waiver published — members notified to sign.' : 'Waiver removed.');
-        render();
+        // no re-render: it would wipe unsaved section-builder edits below
       });
       document.getElementById('img-up')?.addEventListener('click', async () => {
         const file = (document.getElementById('img-file') as HTMLInputElement).files?.[0];
@@ -356,7 +356,15 @@ import AppLayout from '../../layouts/AppLayout.astro';
           const [status, id] = b.dataset.enq!.split(':');
           const { error } = await supabase.from('club_enquiries').update({ status }).eq('id', id);
           if (error) return toast(errMsg(error), 'err');
-          render();
+          // update in place — a full re-render would wipe unsaved page edits
+          b.closest('.surface-card')?.querySelector('.pill')!.replaceWith(
+            Object.assign(document.createElement('span'), {
+              className: `pill ${status === 'contacted' ? 'pill-warn' : ''}`,
+              textContent: status,
+            })
+          );
+          b.parentElement?.remove();
+          toast('Updated.');
         })
       );
     }

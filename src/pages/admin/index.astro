@@ -687,6 +687,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
       );
       content.querySelectorAll<HTMLSelectElement>('[data-user]').forEach((sel) =>
         sel.addEventListener('change', async () => {
+          if (sel.dataset.user === ctx.profile.id && sel.value !== 'admin'
+              && !confirm("This is YOUR account — changing your own role removes your admin access. Continue?")) {
+            render();
+            return;
+          }
           const { error } = await supabase.rpc('set_member_role', { p_club: clubId, p_profile: sel.dataset.user, p_role: sel.value });
           if (error) return toast(errMsg(error), 'err');
           toast('Role updated.');

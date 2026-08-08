@@ -42,13 +42,19 @@ import AppLayout from '../layouts/AppLayout.astro';
     const form = document.getElementById('lead-form') as HTMLFormElement;
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+      if (btn?.disabled) return;
+      if (btn) btn.disabled = true;
       const { error } = await supabase.from('club_leads').insert({
         club_name: (document.getElementById('l-club') as HTMLInputElement).value,
         contact_name: (document.getElementById('l-name') as HTMLInputElement).value,
         email: (document.getElementById('l-email') as HTMLInputElement).value,
         message: (document.getElementById('l-msg') as HTMLTextAreaElement).value || null,
       });
-      if (error) return toast(errMsg(error), 'err');
+      if (error) {
+        if (btn) btn.disabled = false;
+        return toast(errMsg(error), 'err');
+      }
       form.classList.add('hidden');
       document.getElementById('lead-done')?.classList.remove('hidden');
     });

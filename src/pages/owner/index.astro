@@ -252,7 +252,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         const pct = Number((document.getElementById('pr-pct') as HTMLInputElement).value);
         const months = Number((document.getElementById('pr-months') as HTMLInputElement).value || 3);
         if (!code || !pct) return toast('Code and % required.', 'err');
-        const { error } = await supabase.rpc('owner_save_promo', { p_code: code, p_percent: pct, p_months: months });
+        const { error } = await supabase.rpc('owner_save_promo', { p_code: code.toUpperCase(), p_percent: pct, p_months: months });
         if (error) return toast(errMsg(error), 'err');
         toast('Promo live — share it. 🏷️');
         render();

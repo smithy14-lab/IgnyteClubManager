@@ -42,7 +42,7 @@ import AppLayout from '../layouts/AppLayout.astro';
         return;
       }
       const ctx = await requireAuth();
-      const rows = ctx.memberships.filter((m) => m.status !== 'removed');
+      const rows = ctx.memberships.filter((m) => m.status !== 'removed' && m.clubs);
       membershipsEl.innerHTML = rows.length
         ? rows
             .map((m) => {

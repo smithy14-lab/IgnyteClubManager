@@ -181,7 +181,8 @@ import AppLayout from '../../layouts/AppLayout.astro';
         <div class="grid gap-3">
           ${day
             .map((b) => {
-              const past = date <= today;
+              // only after the lesson's end time counts as past (register due)
+              const past = date < today || (date === today && b.slots.end_time <= new Date().toTimeString().slice(0, 8));
               return `
             <div class="surface-card p-4 flex flex-wrap items-center justify-between gap-3">
               <div>

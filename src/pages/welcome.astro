@@ -37,10 +37,10 @@ import IgnyteMark from '../components/IgnyteMark.astro';
     const expired = document.getElementById('expired')!;
 
     (async () => {
-      // the invite link signs the user in via the URL hash; give it a moment
+      // the invite link signs the user in via the URL hash; poll up to 6s
       let session = (await supabase.auth.getSession()).data.session;
-      if (!session) {
-        await new Promise((r) => setTimeout(r, 800));
+      for (let i = 0; i < 12 && !session; i++) {
+        await new Promise((r) => setTimeout(r, 500));
         session = (await supabase.auth.getSession()).data.session;
       }
       if (!session) {

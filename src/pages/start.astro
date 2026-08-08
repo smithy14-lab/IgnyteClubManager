@@ -174,10 +174,12 @@ import IgnyteMark from '../components/IgnyteMark.astro';
         const pw = (document.getElementById('w-pw') as HTMLInputElement).value;
         if (!yourName || !email || pw.length < 8) return toast('Fill in your name, email and a password (8+ characters).', 'err');
         const { data, error } = await supabase.auth.signUp({
-          email, password: pw, options: { data: { full_name: yourName } },
+          email, password: pw,
+          options: { data: { full_name: yourName }, emailRedirectTo: location.origin + '/start' },
         });
         if (error) throw error;
         if (data.session) {
+          signedIn = true; // if provisioning fails (e.g. slug taken), retry skips signUp
           await provision(p);
           toast('Welcome to Ignyte! 🎉');
         } else {

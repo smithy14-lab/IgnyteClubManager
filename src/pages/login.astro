@@ -49,14 +49,14 @@ import IgnyteMark from '../components/IgnyteMark.astro';
       });
       if (error) return toast(errMsg(error), 'err');
       const next = new URLSearchParams(location.search).get('next');
-      location.href = next && next.startsWith('/') ? next : '/dashboard';
+      location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
     });
 
     document.getElementById('forgot')?.addEventListener('click', async () => {
       const email = (document.getElementById('email') as HTMLInputElement).value;
       if (!email) return toast('Type your email above first.', 'err');
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: location.origin + '/login',
+        redirectTo: location.origin + '/welcome',
       });
       if (error) return toast(errMsg(error), 'err');
       toast('Password reset email sent — check your inbox.');

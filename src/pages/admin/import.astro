@@ -25,17 +25,21 @@ import AppLayout from '../../layouts/AppLayout.astro';
     let ctx: AuthCtx;
 
     async function importApi(body: Record<string, unknown>): Promise<{ ok?: boolean; invited?: boolean; booked?: number; athletes?: number; error?: string }> {
-      const { data: s } = await supabase.auth.getSession();
-      const res = await fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/admin-import`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${s.session?.access_token ?? ''}`,
-          apikey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify(body),
-      });
-      return res.json().catch(() => ({ error: 'Import service unreachable — is the admin-import function deployed?' }));
+      try {
+        const { data: s } = await supabase.auth.getSession();
+        const res = await fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/admin-import`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${s.session?.access_token ?? ''}`,
+            apikey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify(body),
+        });
+        return await res.json();
+      } catch {
+        return { error: 'Import service unreachable — check your connection (is the admin-import function deployed?).' };
+      }
     }
 
     let athleteRows = 1;

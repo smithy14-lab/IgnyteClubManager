@@ -126,7 +126,11 @@ import AppLayout from '../layouts/AppLayout.astro';
         .join('');
     }
 
-    const link = (p: string) => (onCustomDomain ? `/${p}` : `/c/${slug}${p ? '/' + p : ''}`);
+    // page targets are club-authored: hard-sanitise so nothing can escape the href
+    const link = (p: string) => {
+      const safe = (p ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+      return onCustomDomain ? `/${safe}` : `/c/${slug}${safe ? '/' + safe : ''}`;
+    };
 
     function classesHtml(c: Site) {
       return (c.classes ?? []).length

@@ -30,12 +30,15 @@ import AppLayout from '../layouts/AppLayout.astro';
 
         const progressMap = new Map<string, { pct: number; mastered: number; working: number }>();
         if (athleteIds.length) {
-          const [{ count: totalSkills }, { data: statuses }] = await Promise.all([
+          const [{ count: totalSkills }, { data: statuses }, { data: clubSkills }] = await Promise.all([
             supabase.from('skills').select('*', { count: 'exact', head: true }).eq('club_id', club.id),
-            supabase.from('athlete_skills').select('athlete_id, status').in('athlete_id', athleteIds),
+            supabase.from('athlete_skills').select('athlete_id, status, skill_id').in('athlete_id', athleteIds),
+            supabase.from('skills').select('id').eq('club_id', club.id),
           ]);
+          // only THIS club's skills count — multi-club athletes carry other clubs' rows
+          const clubSkillIds = new Set((clubSkills ?? []).map((s) => s.id));
           for (const id of athleteIds) {
-            const mine = (statuses ?? []).filter((s) => s.athlete_id === id);
+            const mine = (statuses ?? []).filter((s) => s.athlete_id === id && clubSkillIds.has(s.skill_id));
             const done = mine.filter((s) => s.status === 'achieved' || s.status === 'mastered').length;
             progressMap.set(id, {
               pct: totalSkills ? Math.round((done / totalSkills) * 100) : 0,

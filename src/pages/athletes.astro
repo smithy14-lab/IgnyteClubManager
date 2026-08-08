@@ -156,7 +156,11 @@ import AppLayout from '../layouts/AppLayout.astro';
     }
 
     (async () => {
-      ctx = await requireAuth(['parent', 'admin']);
+      ctx = await requireAuth(['parent', 'athlete', 'admin']);
+      // 18+ athletes manage their own record; the add-a-child form is for parents
+      if (ctx.club && ctx.memberships.find((m) => m.club_id === ctx.club!.id)?.role === 'athlete') {
+        (document.querySelector('.surface-card.p-5.max-w-md') as HTMLElement | null)?.classList.add('hidden');
+      }
       const form = document.getElementById('add-form') as HTMLFormElement;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
