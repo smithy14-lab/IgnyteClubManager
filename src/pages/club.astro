@@ -35,7 +35,8 @@ import AppLayout from '../layouts/AppLayout.astro';
 
     type Site = {
       name: string; slug: string; blurb: string | null; accent_color: string | null;
-      website: boolean; open_join?: boolean; pages: { slug: string; title: string; body: string }[];
+      website: boolean; open_join?: boolean;
+      pages: { slug: string; title: string; body: string; blocks: Block[] | null }[];
       coaches: { name: string; disciplines: string[] | null; levels: string | null }[];
       upcoming_slots: number; locations: string[];
       shop?: { name: string; description: string | null; price: number; options: string[]; image_url: string | null; in_stock: boolean }[];
@@ -44,6 +45,59 @@ import AppLayout from '../layouts/AppLayout.astro';
         age_min: number | null; age_max: number | null; monthly_fee: number | null;
         price_per_session: number | null; trial_allowed: boolean }[];
     };
+
+    type Block = {
+      type: string; heading?: string; sub?: string; md?: string; url?: string;
+      caption?: string; side?: string; images?: string[]; label?: string; page?: string;
+      cta_label?: string; cta_page?: string;
+    };
+
+    /** Wix-style sections: static blocks render content, live blocks render club data. */
+    function renderBlocks(c: Site, blocks: Block[], signedIn: boolean): string {
+      const img = (u?: string, cls = '') =>
+        u && /^https:\/\//.test(u) ? `<img src="${esc(u)}" alt="" class="rounded-xl max-w-full ${cls}" loading="lazy" />` : '';
+      return blocks
+        .map((b) => {
+          switch (b.type) {
+            case 'hero':
+              return `<div class="text-center py-8">
+                ${b.heading ? `<h1 class="text-3xl font-display">${esc(b.heading)}</h1>` : ''}
+                ${b.sub ? `<p class="text-mist-400 mt-3 max-w-xl mx-auto">${esc(b.sub)}</p>` : ''}
+                ${b.url ? `<div class="mt-5 flex justify-center">${img(b.url, 'max-h-80 object-cover w-full')}</div>` : ''}
+                ${b.cta_label ? `<a href="${link(b.cta_page ?? 'join')}" class="btn btn-primary mt-6">${esc(b.cta_label)}</a>` : ''}
+              </div>`;
+            case 'text':
+              return `<div class="surface-card p-6 mt-4 text-left">${md(b.md ?? '')}</div>`;
+            case 'image':
+              return `<figure class="mt-4 text-center">${img(b.url, 'w-full object-cover')}
+                ${b.caption ? `<figcaption class="text-xs text-mist-500 mt-2">${esc(b.caption)}</figcaption>` : ''}</figure>`;
+            case 'image_text':
+              return `<div class="surface-card p-6 mt-4 grid gap-5 sm:grid-cols-2 items-center">
+                <div class="${b.side === 'right' ? 'sm:order-2' : ''}">${img(b.url, 'w-full object-cover')}</div>
+                <div class="text-left">${md(b.md ?? '')}</div>
+              </div>`;
+            case 'gallery':
+              return `<div class="mt-4 grid gap-2 grid-cols-2 sm:grid-cols-3">
+                ${(b.images ?? []).slice(0, 12).map((u) => img(u, 'w-full h-36 object-cover')).join('')}
+              </div>`;
+            case 'cta':
+              return `<div class="text-center mt-6"><a href="${link(b.page ?? 'join')}" class="btn btn-primary">${esc(b.label ?? 'Join us')}</a></div>`;
+            case 'timetable':
+              return classesHtml(c);
+            case 'coaches':
+              return coachesHtml(c);
+            case 'events':
+              return eventsHtml(c);
+            case 'shop':
+              return shopHtml(c);
+            case 'contact':
+              return contactHtml(c);
+            default:
+              return '';
+          }
+        })
+        .join('');
+    }
 
     /** Tiny markdown: headings, bold/italic, https links, lists, paragraphs. Escapes first. */
     function md(src: string): string {
@@ -310,7 +364,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       } else {
         const navItems: [string, string][] = [
           ['Home', ''],
-          ...c.pages.map((p) => [p.title, p.slug] as [string, string]),
+          ...c.pages.filter((p) => p.slug !== 'home').map((p) => [p.title, p.slug] as [string, string]),
           ['Classes', 'classes'],
           ...((c.shop ?? []).length ? [['Shop', 'shop'] as [string, string]] : []),
           ['Contact', 'contact'],
@@ -326,13 +380,16 @@ import AppLayout from '../layouts/AppLayout.astro';
         </nav>`;
 
         const page = c.pages.find((p) => p.slug === pageSlug);
+        const homePage = c.pages.find((p) => p.slug === 'home');
         let bodyHtml: string;
         if (pageSlug === 'classes') bodyHtml = classesHtml(c) + joinHtml(c, signedIn);
         else if (pageSlug === 'shop') bodyHtml = shopHtml(c) + joinHtml(c, signedIn);
         else if (pageSlug === 'coaches') bodyHtml = coachesHtml(c) || '<p class="text-sm text-mist-500 mt-4">Coach profiles coming soon.</p>';
         else if (pageSlug === 'contact') bodyHtml = contactHtml(c);
+        else if (page?.blocks?.length) bodyHtml = renderBlocks(c, page.blocks, signedIn);
         else if (page) bodyHtml = `<div class="surface-card p-6 mt-4 text-left">${md(page.body)}</div>`;
-        else bodyHtml = bookCallout + classesHtml(c) + eventsHtml(c) + coachesHtml(c) + joinHtml(c, signedIn); // home
+        else if (homePage?.blocks?.length) bodyHtml = renderBlocks(c, homePage.blocks, signedIn) + joinHtml(c, signedIn); // built home
+        else bodyHtml = bookCallout + classesHtml(c) + eventsHtml(c) + coachesHtml(c) + joinHtml(c, signedIn); // default home
 
         portal.innerHTML = hero + nav + bodyHtml;
       }
