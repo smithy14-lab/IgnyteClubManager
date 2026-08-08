@@ -15,6 +15,11 @@ import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 
 const BASE = process.env.APP_URL ?? 'https://ignyte-club-manager.nathansmith00.workers.dev';
+// locally there is no /c/{slug} worker rewrite — use the query-param form
+const clubUrl = (slug, page = '') =>
+  BASE.includes('127.0.0.1') || BASE.includes('localhost')
+    ? `${BASE}/club?s=${slug}${page ? `&p=${page}` : ''}`
+    : `${BASE}/c/${slug}${page ? `/${page}` : ''}`;
 const CHROME = process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const STAGE = process.argv[2] ?? 'stage1';
 const PW = 'TestDrive123!';
@@ -36,7 +41,12 @@ const save = () =>
   fs.appendFileSync('e2e-notes.md', `\n## ${STAGE} — ${new Date().toISOString()}\n${notes.join('\n')}\n`);
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: CHROME });
+  const local = BASE.includes('127.0.0.1') || BASE.includes('localhost');
+  const browser = await chromium.launch({
+    executablePath: CHROME,
+    proxy: !local && process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY } : undefined,
+    args: local ? ['--no-proxy-server'] : [],
+  });
   const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
   const shot = async (name) => {
     shotN++;
@@ -103,6 +113,56 @@ async function main() {
       }
     }
 
+    if (STAGE === 'stage1b') {
+      // founder was interrupted by email confirmation: sign in and finish
+      note('Founder signs in after confirming…');
+      await page.goto(`${BASE}/login`, { waitUntil: 'load' });
+      await page.waitForTimeout(1500);
+      await page.fill('input[type="email"]', EMAILS.founder);
+      await page.fill('input[type="password"]', PW);
+      await page.locator('button[type="submit"]').first().click();
+      await page.waitForTimeout(4000);
+      await shot('founder-signed-in');
+      note('Back to /start to finish the club (signed-in mode)…');
+      await page.goto(`${BASE}/start`, { waitUntil: 'load' });
+      await page.waitForTimeout(2000);
+      await page.fill('#w-name', CLUB.name);
+      await page.fill('#w-loc', 'Blaze Gym');
+      await page.fill('#w-promo', 'TESTDRIVE');
+      await page.locator('#w-promo').blur();
+      await page.waitForTimeout(1200);
+      await page.click('#w-go');
+      await page.waitForTimeout(5000);
+      const done1b = await page.locator('#done').isVisible().catch(() => false);
+      note(done1b ? '✅ Club created' : `❓ Not done. Toast: ${await toastText()}`);
+      await shot(done1b ? 'club-live' : 'club-not-done');
+
+      if (done1b) {
+        await page.goto(`${BASE}/admin/website`, { waitUntil: 'load' });
+        await page.waitForTimeout(3000);
+        await shot('admin-website');
+        note('Publishing an About page…');
+        const newCard = page.locator('[data-pagecard=""]');
+        await newCard.locator('[data-f="title"]').fill('About us');
+        await newCard.locator('[data-f="slug"]').fill('about');
+        await newCard.locator('[data-f="body"]').fill('# Welcome to Blaze\n\nWe are a **test** cheer academy.');
+        await newCard.locator('button:has-text("Add page")').click();
+        await page.waitForTimeout(2500);
+        await shot('page-added');
+
+        note('Inviting the coach from Admin → Import…');
+        await page.goto(`${BASE}/admin/import`, { waitUntil: 'load' });
+        await page.waitForTimeout(3000);
+        await page.fill('#c-name', 'Casey Coach');
+        await page.fill('#c-email', EMAILS.coach);
+        await shot('import-filled');
+        await page.click('#c-go');
+        await page.waitForTimeout(5000);
+        note(`Invite result toast: ${await toastText()}`);
+        await shot('coach-invited');
+      }
+    }
+
     if (STAGE === 'stage2') {
       note('Signing in as the coach…');
       await page.goto(`${BASE}/login`, { waitUntil: 'load' });
@@ -119,11 +179,11 @@ async function main() {
     }
 
     if (STAGE === 'stage3') {
-      note(`Visiting the club website /c/${CLUB.slug}…`);
-      await page.goto(`${BASE}/c/${CLUB.slug}`, { waitUntil: 'load' });
+      note(`Visiting the club website ${clubUrl(CLUB.slug)}…`);
+      await page.goto(clubUrl(CLUB.slug), { waitUntil: 'load' });
       await page.waitForTimeout(2500);
       await shot('club-website');
-      await page.goto(`${BASE}/c/${CLUB.slug}/join`, { waitUntil: 'load' });
+      await page.goto(clubUrl(CLUB.slug, 'join'), { waitUntil: 'load' });
       await page.waitForTimeout(2000);
       await shot('branded-join');
       note('Signing up as a family via the branded join page…');

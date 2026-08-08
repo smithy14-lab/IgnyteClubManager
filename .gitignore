@@ -11,3 +11,5 @@ node_modules/
 
 # system
 .DS_Store
+e2e-shots/
+e2e-notes.md
