@@ -6,9 +6,17 @@
 import AppLayout from '../layouts/AppLayout.astro';
 ---
 
-<AppLayout title="Club">
-  <div id="portal" class="max-w-2xl mx-auto py-6">
-    <p class="text-mist-500 text-sm text-center">Loading club…</p>
+<AppLayout title="Club" chrome={false}>
+  <div class="min-h-dvh flex flex-col">
+    <div id="portal" class="max-w-2xl w-full mx-auto py-8 px-4 flex-1">
+      <p class="text-mist-500 text-sm text-center">Loading club…</p>
+    </div>
+    <footer class="py-5 text-center border-t border-ink-800">
+      <a href="/" id="powered-by" class="text-xs text-mist-500 hover:text-ignite-400">
+        ⚡ Powered by <span class="font-semibold">Ignyte Club Manager</span>
+      </a>
+      <a href="/dashboard" id="openapp-footer" class="hidden text-xs text-ignite-400 ml-3">Open the app →</a>
+    </footer>
   </div>
 
   <script>
@@ -237,6 +245,11 @@ import AppLayout from '../layouts/AppLayout.astro';
       if (!slug && onCustomDomain) {
         const { data: resolved } = await supabase.rpc('resolve_club_domain', { p_host: location.hostname });
         if (resolved) slug = resolved;
+        // subdomain-per-club: blaze.<platform-domain> -> slug "blaze"
+        if (!slug) {
+          const label = location.hostname.split('.')[0];
+          if (label && !['www', 'app'].includes(label)) slug = label;
+        }
       }
       if (!slug) {
         portal.innerHTML = '<p class="text-center text-mist-500">No club specified.</p>';
@@ -262,6 +275,8 @@ import AppLayout from '../layouts/AppLayout.astro';
         document.documentElement.style.setProperty('--color-ignite-600', c.accent_color);
       }
       const signedIn = Boolean(session.session);
+      document.title = c.name;
+      if (signedIn) document.getElementById('openapp-footer')?.classList.remove('hidden');
       const siteMode = c.website && (c.pages ?? []).length > 0;
 
       const hero = `
