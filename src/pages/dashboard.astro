@@ -9,7 +9,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
+    import { requireAuth, todayISO, myAthletes, fmtDate, fmtTime, esc, toast, errMsg } from '../lib/app';
 
     const dash = document.getElementById('dash')!;
 
@@ -17,7 +17,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       const ctx = await requireAuth('any');
       const club = ctx.club!;
       const role = club.role === 'owner' ? 'admin' : club.role;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const firstName = ctx.profile.full_name.split(' ')[0];
 
       let html = `

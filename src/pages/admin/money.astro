@@ -16,7 +16,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../../lib/supabase';
-    import { requireAuth, esc, toast, errMsg, fmtDate, type AuthCtx } from '../../lib/app';
+    import { requireAuth, todayISO, esc, toast, errMsg, fmtDate, type AuthCtx } from '../../lib/app';
 
     const content = document.getElementById('content')!;
     let ctx: AuthCtx;
@@ -290,15 +290,16 @@ import AppLayout from '../../layouts/AppLayout.astro';
                 <input class="field" id="st-key" type="password" placeholder="rk_live_… (stored securely, never shown again)" autocomplete="off" />
                 <div class="flex flex-wrap gap-2 items-center mt-2">
                   <label class="text-xs text-mist-300 flex gap-1.5 items-center">
-                    <input type="checkbox" id="st-pass" ${settings?.card_payments_enabled ? '' : 'checked'} /> Add the card fee to the family's total
+                    <input type="checkbox" id="st-pass" checked /> Add the card fee to the family's total
                   </label>
                   <input class="field !w-20 !py-1 !text-xs" id="st-pct" type="number" step="0.1" min="0" value="1.5" title="fee %" />
                   <span class="text-xs text-mist-500">% +</span>
                   <input class="field !w-20 !py-1 !text-xs" id="st-fix" type="number" step="0.01" min="0" value="0.20" title="fixed fee" />
                   <span class="text-xs text-mist-500">fixed</span>
                 </div>
+                ${settings?.card_payments_enabled ? '<p class="text-[0.68rem] text-mist-500 mt-1">Saving re-applies the fee settings exactly as shown above — set them how you want them before you save.</p>' : ''}
                 <div class="flex gap-2 mt-2">
-                  <button class="btn btn-primary btn-sm" id="st-save">Connect Stripe</button>
+                  <button class="btn btn-primary btn-sm" id="st-save">${settings?.card_payments_enabled ? 'Update key & fees' : 'Connect Stripe'}</button>
                   ${settings?.card_payments_enabled ? '<button class="btn btn-danger btn-sm" id="st-off">Disconnect</button>' : ''}
                 </div>
               </div>
@@ -439,7 +440,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(inv), 'Invoices');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pay), 'Payments');
-        XLSX.writeFile(wb, `ignyte-money-${new Date().toISOString().slice(0, 10)}.xlsx`);
+        XLSX.writeFile(wb, `ignyte-money-${todayISO()}.xlsx`);
       });
     }
 

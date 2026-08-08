@@ -13,7 +13,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, esc, toast, errMsg, ageFromDob, type AuthCtx } from '../lib/app';
+    import { requireAuth, todayISO, myAthletes, esc, toast, errMsg, ageFromDob, type AuthCtx } from '../lib/app';
 
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const list = document.getElementById('list')!;
@@ -165,7 +165,7 @@ import AppLayout from '../layouts/AppLayout.astro';
             .from('class_sessions')
             .select('id, session_date')
             .eq('class_id', cid)
-            .gte('session_date', new Date().toISOString().slice(0, 10))
+            .gte('session_date', todayISO())
             .eq('cancelled', false)
             .order('session_date')
             .limit(4);

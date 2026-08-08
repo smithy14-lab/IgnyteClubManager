@@ -16,7 +16,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../../lib/supabase';
-    import { requireAuth, esc, toast, errMsg, ageFromDob, fmtDate, type AuthCtx } from '../../lib/app';
+    import { requireAuth, todayISO, esc, toast, errMsg, ageFromDob, fmtDate, type AuthCtx } from '../../lib/app';
 
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const content = document.getElementById('content')!;
@@ -108,7 +108,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const [{ data: enr }, { data: trials }, { data: sess }] = await Promise.all([
         supabase.from('class_enrolments').select('athlete_id, status, created_at, athletes(name, dob, medical_notes)').eq('class_id', cid).neq('status', 'left').order('created_at'),
         supabase.from('class_trials').select('id, status, athletes(name), class_sessions(session_date)').eq('class_id', cid).eq('status', 'booked'),
-        supabase.from('class_sessions').select('id, session_date, cancelled').eq('class_id', cid).gte('session_date', new Date().toISOString().slice(0, 10)).order('session_date').limit(6),
+        supabase.from('class_sessions').select('id, session_date, cancelled').eq('class_id', cid).gte('session_date', todayISO()).order('session_date').limit(6),
       ]);
       const row = (e: NonNullable<typeof enr>[number]) => {
         const a = e.athletes as unknown as { name: string; dob: string; medical_notes: string | null };

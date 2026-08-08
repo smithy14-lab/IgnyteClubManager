@@ -9,7 +9,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg, type ActiveClub } from '../lib/app';
+    import { requireAuth, todayISO, myAthletes, fmtDate, fmtTime, esc, toast, errMsg, type ActiveClub } from '../lib/app';
 
     const content = document.getElementById('content')!;
     let club: ActiveClub | null = null;
@@ -20,7 +20,7 @@ import AppLayout from '../layouts/AppLayout.astro';
       club = ctx.club!;
       const athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
       const ids = athletes.map((a) => a.id);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
 
       const { data: settings } = await supabase
         .from('club_settings')
@@ -85,7 +85,7 @@ import AppLayout from '../layouts/AppLayout.astro';
                 expires ${new Date(o.offer_expires_at).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
               </p>
               <div class="mt-2.5 flex gap-2">
-                <button class="btn btn-primary btn-sm" data-accept="${o.id}" data-anycoach="${o.requested_coach_id ? '' : '1'}" data-slot="${o.slot_id}">Accept space</button>
+                <button class="btn btn-primary btn-sm" data-accept="${o.id}" data-anycoach="${o.requested_coach_id ? '' : '1'}" data-slot="${o.slot_id}" data-date="${o.slots.slot_date}">Accept space</button>
                 <button class="btn btn-ghost btn-sm" data-decline="${o.id}">Pass</button>
               </div>
             </div>`
@@ -232,37 +232,37 @@ import AppLayout from '../layouts/AppLayout.astro';
           render();
         })
       );
+      const acceptOffer = async (waitlistId: string, coachId: string | null) => {
+        const { error } = await supabase.rpc('accept_waitlist_offer', {
+          p_waitlist_id: waitlistId,
+          p_coach_id: coachId,
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Space accepted — lesson booked! 🎉');
+        render();
+      };
       content.querySelectorAll<HTMLButtonElement>('[data-accept]').forEach((b) =>
         b.addEventListener('click', async () => {
-          let coachId: string | null = null;
-          if (b.dataset.anycoach) {
-            // "Any coach" entry — find a free coach in the slot to book with.
-            const { data: board } = await supabase.rpc('get_slot_board', {
-              p_club: club!.id,
-              p_from: '1970-01-01',
-              p_to: '2100-01-01',
-            });
-            const slot = ((board ?? []) as { id: string; coaches: { id: string; name: string; busy: boolean }[] }[]).find(
-              (s) => s.id === b.dataset.slot
-            );
-            const free = slot?.coaches.filter((c) => !c.busy) ?? [];
-            if (!free.length) return toast('No coach is free in that slot any more.', 'err');
-            if (free.length === 1) coachId = free[0].id;
-            else {
-              const names = free.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
-              const pick = prompt(`Which coach?\n${names}\n\nEnter a number:`, '1');
-              const idx = pick ? parseInt(pick, 10) - 1 : -1;
-              if (idx < 0 || idx >= free.length) return;
-              coachId = free[idx].id;
-            }
-          }
-          const { error } = await supabase.rpc('accept_waitlist_offer', {
-            p_waitlist_id: b.dataset.accept,
-            p_coach_id: coachId,
-          });
-          if (error) return toast(errMsg(error), 'err');
-          toast('Space accepted — lesson booked! 🎉');
-          render();
+          const waitlistId = b.dataset.accept!;
+          if (!b.dataset.anycoach) return acceptOffer(waitlistId, null);
+          // "Any coach" entry — find a free coach in the slot to book with.
+          const day = b.dataset.date || todayISO();
+          const { data: board } = await supabase.rpc('get_slot_board', { p_club: club!.id, p_from: day, p_to: day });
+          const slot = ((board ?? []) as { id: string; coaches: { id: string; name: string; busy: boolean }[] }[]).find(
+            (s) => s.id === b.dataset.slot
+          );
+          const free = slot?.coaches.filter((c) => !c.busy) ?? [];
+          if (!free.length) return toast('No coach is free in that slot any more.', 'err');
+          if (free.length === 1) return acceptOffer(waitlistId, free[0].id);
+          const row = b.parentElement!;
+          row.innerHTML =
+            '<span class="text-xs text-mist-400 self-center">Who with?</span>' +
+            free.map((c) => `<button class="btn btn-primary btn-sm" data-pick="${c.id}">${esc(c.name)}</button>`).join('') +
+            '<button class="btn btn-ghost btn-sm" data-pickback>Back</button>';
+          row.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((p) =>
+            p.addEventListener('click', () => acceptOffer(waitlistId, p.dataset.pick!))
+          );
+          row.querySelector('[data-pickback]')?.addEventListener('click', () => render());
         })
       );
     }

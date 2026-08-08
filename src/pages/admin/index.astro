@@ -28,7 +28,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../../lib/supabase';
-    import { requireAuth, fmtDate, fmtTime, esc, toast, errMsg } from '../../lib/app';
+    import { requireAuth, todayISO, fmtDate, fmtTime, esc, toast, errMsg } from '../../lib/app';
     import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../../lib/calendar';
     import type { AuthCtx } from '../../lib/app';
 
@@ -133,7 +133,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     async function renderSlots() {
       if (slotView === 'calendar') return renderSlotsCalendar();
-      const from = new Date().toISOString().slice(0, 10);
+      const from = todayISO();
       const toD = new Date();
       toD.setDate(toD.getDate() + 56);
       const { data: board } = await supabase.rpc('get_slot_board', {
@@ -373,7 +373,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     // ============================ BOOKINGS ============================
     async function renderBookings() {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
       content.innerHTML = `

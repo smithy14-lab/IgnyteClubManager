@@ -19,7 +19,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../../lib/supabase';
-    import { requireAuth, esc, toast, errMsg, fmtDate, fmtTime, type AuthCtx } from '../../lib/app';
+    import { requireAuth, todayISO, esc, toast, errMsg, fmtDate, fmtTime, type AuthCtx } from '../../lib/app';
 
     const content = document.getElementById('content')!;
     let ctx: AuthCtx;
@@ -49,7 +49,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const [{ data: members }, { data: settings }, { data: slots }] = await Promise.all([
         supabase.from('club_members').select('profile_id, role, profiles(full_name)').eq('club_id', club.id).eq('status', 'active').in('role', ['coach', 'admin']),
         supabase.from('club_settings').select('disciplines').eq('club_id', club.id).single(),
-        supabase.from('slots').select('id, slot_date, start_time, series_id, slot_coaches(coach_id)').eq('club_id', club.id).gte('slot_date', new Date().toISOString().slice(0, 10)).order('slot_date').order('start_time').limit(200),
+        supabase.from('slots').select('id, slot_date, start_time, series_id, slot_coaches(coach_id)').eq('club_id', club.id).gte('slot_date', todayISO()).order('slot_date').order('start_time').limit(200),
       ]);
       const coaches = (members ?? []).map((m) => ({ id: m.profile_id, name: (m.profiles as unknown as { full_name: string })?.full_name ?? '?' }));
       const disciplines: string[] = settings?.disciplines ?? ['tumble', 'dance'];

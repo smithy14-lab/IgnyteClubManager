@@ -46,6 +46,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       esc,
       toast,
       errMsg,
+      todayISO,
       skillStatusLabels,
       skillStatusOrder,
     } from '../../lib/app';
@@ -159,7 +160,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
         .sort((a, b) =>
           (a.slots.slot_date + a.slots.start_time).localeCompare(b.slots.slot_date + b.slots.start_time)
         );
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
 
       if (!lessons.length) {
         content.innerHTML =
@@ -320,7 +321,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
     // ---------------- Join slots ----------------
     async function renderSlots() {
-      const from = new Date().toISOString().slice(0, 10);
+      const from = todayISO();
       const toD = new Date();
       toD.setDate(toD.getDate() + 28);
       const [{ data: board }, { data: mine }] = await Promise.all([

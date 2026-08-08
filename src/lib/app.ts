@@ -260,10 +260,24 @@ export function toast(message: string, type: 'ok' | 'err' = 'ok'): void {
   setTimeout(() => el.remove(), 4200);
 }
 
+/** Today as YYYY-MM-DD in the user's own timezone (toISOString is UTC — wrong late at night in BST). */
+export function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function errMsg(e: unknown): string {
   const raw =
     (e as { message?: string })?.message ?? (typeof e === 'string' ? e : 'Something went wrong');
-  return raw.replace(/^.*?exception:? /i, '');
+  const msg = raw.replace(/^.*?exception:? /i, '');
+  // Postgres/PostgREST internals nobody should read — translate the common ones.
+  if (/^JWT expired/i.test(msg)) return 'Your session expired — refresh the page and sign in again.';
+  if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) return "Can't reach the server — check your connection and try again.";
+  if (/duplicate key value/i.test(msg)) return 'That already exists — no need to add it twice.';
+  if (/violates foreign key/i.test(msg)) return "That can't be removed while other records still use it.";
+  if (/violates row-level security|permission denied/i.test(msg)) return "You don't have permission to do that in this club.";
+  if (/invalid input syntax/i.test(msg)) return 'One of the values doesn’t look right — check the form and try again.';
+  return msg;
 }
 
 export const skillStatusLabels: Record<string, string> = {

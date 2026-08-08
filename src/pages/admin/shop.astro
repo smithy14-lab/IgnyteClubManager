@@ -131,6 +131,8 @@ import AppLayout from '../../layouts/AppLayout.astro';
         scope.querySelectorAll<HTMLButtonElement>('[data-saveprod]').forEach((b) =>
           b.addEventListener('click', async () => {
             const f = (n: string) => scope.querySelector(`[data-f="${n}"]`) as HTMLInputElement;
+            if (!f('name').value.trim()) return toast('Give the product a name.', 'err');
+            if (f('price').value === '') return toast('Set a price (0 is fine for freebies — but say so on purpose).', 'err');
             const { error } = await supabase.rpc('admin_save_product', {
               p_club: club.id,
               p_id: b.dataset.saveprod || null,

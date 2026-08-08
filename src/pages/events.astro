@@ -9,7 +9,7 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, esc, toast, errMsg, fmtDate, fmtTime, type AuthCtx } from '../lib/app';
+    import { requireAuth, todayISO, myAthletes, esc, toast, errMsg, fmtDate, fmtTime, type AuthCtx } from '../lib/app';
 
     const content = document.getElementById('content')!;
     let ctx: AuthCtx;
@@ -17,7 +17,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     async function render() {
       const club = ctx.club!;
       const [{ data: events }, athletes, { data: settings }] = await Promise.all([
-        supabase.from('events').select('*, locations(name)').eq('club_id', club.id).eq('active', true).gte('event_date', new Date().toISOString().slice(0, 10)).order('event_date'),
+        supabase.from('events').select('*, locations(name)').eq('club_id', club.id).eq('active', true).gte('event_date', todayISO()).order('event_date'),
         myAthletes(club.id),
         supabase.from('club_settings').select('currency').eq('club_id', club.id).single(),
       ]);
