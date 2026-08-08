@@ -36,6 +36,11 @@ import AppLayout from '../layouts/AppLayout.astro';
     const membershipsEl = document.getElementById('memberships')!;
 
     async function render() {
+      // an unfinished start-a-club signup? send them back to complete it
+      if (localStorage.getItem('icm-pending-club')) {
+        location.href = '/start';
+        return;
+      }
       const ctx = await requireAuth();
       const rows = ctx.memberships.filter((m) => m.status !== 'removed');
       membershipsEl.innerHTML = rows.length
