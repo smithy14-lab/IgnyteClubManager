@@ -72,11 +72,13 @@ begin
     if v_promo.code is null then raise exception 'That discount code isn''t valid.'; end if;
   end if;
 
-  insert into clubs (name, slug, contact_name, contact_email, promo_code)
+  -- a 100%-off code means fully comped: every module unlocked from signup
+  insert into clubs (name, slug, contact_name, contact_email, promo_code, plan)
   values (trim(p_name), lower(trim(p_slug)),
     (select full_name from profiles where id = auth.uid()),
     (select email from profiles where id = auth.uid()),
-    v_promo.code)
+    v_promo.code,
+    case when v_promo.percent_off = 100 then 'comped' else 'free' end)
   returning id into v_club;
   insert into club_settings (club_id, timezone, disciplines) values (v_club, p_timezone, p_disciplines);
   insert into club_members (club_id, profile_id, role, status) values (v_club, auth.uid(), 'admin', 'active');
