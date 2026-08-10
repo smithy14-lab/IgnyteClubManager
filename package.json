@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.1.0",
   "private": true,
-  "description": "Ignyte Club Manager — private lesson booking & progression tracking for cheer tumble and all-star dance.",
+  "description": "Ignyte Club Manager \u2014 private lesson booking & progression tracking for cheer tumble and all-star dance.",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -13,7 +13,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "check": "astro check"
+    "check": "astro check",
+    "postbuild": "node scripts/stamp-sw.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.1.1",
