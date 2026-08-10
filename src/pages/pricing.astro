@@ -1,96 +1,118 @@
 ---
 import AppLayout from '../layouts/AppLayout.astro';
 
-const tiers = [
-  {
-    name: 'Free',
-    price: '£0',
-    sub: 'a real club website and classes — actually free',
-    highlight: false,
-    features: [
-      'A one-page club website — section builder, enquiry form, live timetable',
-      'Group classes: booking, registers & waiting lists',
-      'Club shop — kit & merch orders with stock and sizes',
-      'Free taster trials with automatic follow-ups',
-      'Club page, join codes & member approvals',
-      'Up to 30 athletes',
-    ],
-    cta: ['Start free — set up in minutes', '/start'],
-  },
-  {
-    name: 'Small',
-    price: '£15/mo',
-    sub: 'Free + the 1-2-1 privates engine, for growing clubs',
-    highlight: false,
-    features: [
-      'Everything in Free, up to 100 athletes',
-      '1-2-1 private lessons: slots, weekly series, coach cut-offs',
-      'Skill journeys, badges & videos families love',
-      'Invoicing & online payments — card, Direct Debit, 0% fees',
-      'Late fees, chasing, credits, packs & makeup tokens',
-      'Broadcasts + Excel money & coach-pay exports',
-      'Paid taster trials',
-    ],
-    cta: ['Start free, upgrade when ready', '/start'],
-  },
-  {
-    name: 'Club',
-    price: '£35/mo',
-    sub: 'everything, on your own domain — the full club platform',
-    highlight: true,
-    features: [
-      'Everything in Small, unlimited athletes',
-      'Monthly memberships billed on your chosen day',
-      'Full multi-page website on your own domain + club mailbox',
-      'Your branding — colours & logo everywhere',
-      'Coach & family migration from your old system',
-      'Priority support & early access',
-    ],
-    cta: ['Start free, upgrade any time', '/start'],
-  },
-];
+const free = {
+  name: 'Free',
+  price: '£0',
+  sub: 'a real club website and classes — actually free',
+  features: [
+    'A one-page club website — section builder, enquiry form, live timetable',
+    'Group classes: booking, registers & waiting lists',
+    'Club shop — kit & merch orders with stock and sizes',
+    'Free taster trials with automatic follow-ups',
+    'Club page, join codes & member approvals',
+    'Up to 30 athletes',
+  ],
+};
 
-const addons = [
-  ['Privates', '£10/mo', '1-2-1 lesson management on its own: slots, weekly series, skill journeys, invoicing & online payments. Perfect if privates are all you run.'],
-  ['Website Pro', '£10/mo', 'The full website: up to 12 pages, custom domain, club mailbox and your own colours & logo — on top of the free one-page builder.'],
+const club = {
+  name: 'Club',
+  price: '£35/mo',
+  sub: 'every module, unlimited athletes — the full club platform',
+  features: [
+    'All three modules included',
+    'Unlimited athletes',
+    'Full multi-page website on your own domain + club mailbox',
+    'Your branding — colours & logo everywhere',
+    'Coach & family migration from your old system',
+    'Priority support & early access to everything new',
+  ],
+};
+
+const modules = [
+  {
+    key: 'privates',
+    name: '1-2-1 Private lessons',
+    blurb: 'Slots, weekly series, coach cut-offs, skill journeys & badges, invoicing, online payments, late fees, credits & packs.',
+    icon: '⚡',
+  },
+  {
+    key: 'memberships',
+    name: 'Memberships & billing',
+    blurb: 'Monthly memberships billed on your chosen day, auto-invoicing, Direct Debit collection, chasing & late fees.',
+    icon: '💳',
+  },
+  {
+    key: 'websitepro',
+    name: 'Website Pro',
+    blurb: 'Up to 12 pages, your own domain, club mailbox, and your colours & logo everywhere — on top of the free one-page builder.',
+    icon: '🌐',
+  },
 ];
 ---
 
 <AppLayout title="Pricing">
-  <section class="max-w-3xl mx-auto py-10 text-center animate-rise">
+  <section class="max-w-4xl mx-auto py-10 text-center animate-rise">
     <p class="eyebrow justify-center flex">Pricing</p>
-    <h1 class="text-3xl mt-2">Priced like a club, <span class="ignite-text">not a franchise.</span></h1>
+    <h1 class="text-3xl mt-2">Build the package <span class="ignite-text">your club actually needs.</span></h1>
     <p class="mt-3 text-mist-400 max-w-lg mx-auto">
-      No per-member fees. No card machine contracts. One flat price a single private lesson
-      pays for.
+      Start free, tick the modules you want at £8 a month each, or take the lot with Club.
+      No per-member fees. No card machine contracts.
     </p>
-    <div class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 text-left">
-      {tiers.map((t) => (
-        <div class={`surface-card p-6 ${t.highlight ? 'border-ignite-500/50' : ''}`} style={t.highlight ? 'box-shadow: var(--shadow-glow)' : ''}>
-          {t.highlight && <span class="pill pill-accent mb-3">Early access — now</span>}
-          <h2 class="text-lg font-semibold">{t.name}</h2>
-          <p class="mt-1"><span class="text-3xl font-display font-bold ignite-text">{t.price}</span></p>
-          <p class="text-xs text-mist-500 mt-0.5">{t.sub}</p>
-          <ul class="mt-4 flex flex-col gap-2">
-            {t.features.map((f) => (
-              <li class="text-sm text-mist-300 flex gap-2"><span class="text-ignite-400">✓</span>{f}</li>
-            ))}
-          </ul>
-          <a href={t.cta[1]} class={`btn ${t.highlight ? 'btn-primary' : 'btn-ghost'} mt-5 w-full`}>{t.cta[0]}</a>
+
+    <div class="mt-8 grid gap-5 lg:grid-cols-3 text-left items-start">
+      <div class="surface-card p-6">
+        <h2 class="text-lg font-semibold">{free.name}</h2>
+        <p class="mt-1"><span class="text-3xl font-display font-bold ignite-text">{free.price}</span></p>
+        <p class="text-xs text-mist-500 mt-0.5">{free.sub}</p>
+        <ul class="mt-4 flex flex-col gap-2">
+          {free.features.map((f) => (
+            <li class="text-sm text-mist-300 flex gap-2"><span class="text-ignite-400">✓</span>{f}</li>
+          ))}
+        </ul>
+        <a href="/start" class="btn btn-ghost mt-5 w-full">Start free — set up in minutes</a>
+      </div>
+
+      <div class="surface-card p-6 border-ignite-500/30">
+        <span class="pill pill-accent mb-3">Create your package</span>
+        <h2 class="text-lg font-semibold">Build your own</h2>
+        <p class="mt-1">
+          <span class="text-3xl font-display font-bold ignite-text" id="byo-total">£8</span>
+          <span class="text-sm text-mist-400">/mo</span>
+        </p>
+        <p class="text-xs text-mist-500 mt-0.5">everything in Free + the modules you tick — £8/mo each</p>
+        <div class="mt-4 flex flex-col gap-3">
+          {modules.map((m) => (
+            <label class="flex gap-3 items-start cursor-pointer rounded-xl border border-ink-700 p-3 has-checked:border-ignite-500/60 has-checked:bg-ignite-500/5 transition-colors">
+              <input type="checkbox" class="mt-1 accent-[var(--color-ignite-500)]" data-module={m.key} checked={m.key === 'privates'} />
+              <span>
+                <span class="text-sm font-medium">{m.icon} {m.name}</span>
+                <span class="block text-xs text-mist-500 mt-0.5">{m.blurb}</span>
+              </span>
+            </label>
+          ))}
         </div>
-      ))}
-    </div>
-    <div class="mt-8 text-left">
-      <p class="eyebrow justify-center flex">Or pick just what you need</p>
-      <div class="mt-3 grid gap-4 sm:grid-cols-2">
-        {addons.map(([name, price, blurb]) => (
-          <div class="surface-card p-5">
-            <p class="text-sm font-semibold">{name} <span class="ignite-text font-display">{price}</span> <span class="text-xs text-mist-500">on top of Free</span></p>
-            <p class="text-xs text-mist-400 mt-1.5">{blurb}</p>
-          </div>
-        ))}
+        <p class="text-xs text-mist-400 mt-3" id="byo-note">Any module also grows you from 30 to <b>100 athletes</b>.</p>
+        <p class="text-xs text-ignite-400 mt-1.5 hidden" id="byo-club-nudge">
+          Ticking all three? Club gives you every module <b>plus unlimited athletes</b> for £35.
+        </p>
+        <a href="/start" class="btn btn-primary mt-4 w-full">Start free, add modules when ready</a>
+      </div>
+
+      <div class="surface-card p-6 border-ignite-500/50" style="box-shadow: var(--shadow-glow)">
+        <span class="pill pill-accent mb-3">Best value</span>
+        <h2 class="text-lg font-semibold">{club.name}</h2>
+        <p class="mt-1"><span class="text-3xl font-display font-bold ignite-text">{club.price}</span></p>
+        <p class="text-xs text-mist-500 mt-0.5">{club.sub}</p>
+        <ul class="mt-4 flex flex-col gap-2">
+          {club.features.map((f) => (
+            <li class="text-sm text-mist-300 flex gap-2"><span class="text-ignite-400">✓</span>{f}</li>
+          ))}
+        </ul>
+        <a href="/start" class="btn btn-primary mt-5 w-full">Start free, upgrade any time</a>
       </div>
     </div>
+
     <div class="mt-6 surface-card p-6 text-left" style="box-shadow: var(--shadow-glow)">
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="text-lg font-semibold">🚀 Starter Package <span class="ignite-text font-display">£299</span> <span class="text-xs text-mist-500">one-off</span></h2>
@@ -103,14 +125,27 @@ const addons = [
         your old system, and a walkthrough with your team.
       </p>
       <p class="text-xs text-mist-500 mt-2">
-        Available with the Club plan, or with the Website Pro add-on on Free &amp; Small.
+        Available with the Club plan or any package that includes Website Pro.
         Request it from Admin → Website once you're in. Very large migrations (100+ families)
         are quoted individually.
       </p>
     </div>
     <p class="mt-6 text-xs text-mist-500">
-      Every plan: payments stay between you and your families — we never take a cut of club revenue.
-      Modules stack however you like; upgrade, downgrade or add on any time.
+      Every package: payments stay between you and your families — we never take a cut of club revenue.
+      Add, swap or drop modules any time; changes apply from your next month.
     </p>
   </section>
+
+  <script>
+    const boxes = [...document.querySelectorAll<HTMLInputElement>('[data-module]')];
+    const total = document.getElementById('byo-total')!;
+    const nudge = document.getElementById('byo-club-nudge')!;
+    const update = () => {
+      const n = boxes.filter((b) => b.checked).length;
+      total.textContent = `£${n * 8}`;
+      nudge.classList.toggle('hidden', n < 3);
+    };
+    boxes.forEach((b) => b.addEventListener('change', update));
+    update();
+  </script>
 </AppLayout>

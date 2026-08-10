@@ -83,9 +83,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
                     ${['active', 'suspended', 'churned'].map((st) => `<option value="${st}" ${st === c.status ? 'selected' : ''}>${st}</option>`).join('')}
                   </select>
                   <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('privates') ? '!text-ignite-400' : ''}"
-                    data-addon="privates:${c.id}" title="Toggle the Privates add-on (£10/mo)">⚡</button>
+                    data-addon="privates:${c.id}" title="Toggle the Privates module (£8/mo)">⚡</button>
+                  <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('memberships') ? '!text-ignite-400' : ''}"
+                    data-addon="memberships:${c.id}" title="Toggle the Memberships & billing module (£8/mo)">💳</button>
                   <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('websitepro') ? '!text-ignite-400' : ''}"
-                    data-addon="websitepro:${c.id}" title="Toggle the Website Pro add-on (£10/mo)">🌐</button>
+                    data-addon="websitepro:${c.id}" title="Toggle the Website Pro module (£8/mo)">🌐</button>
                   <button class="btn btn-ghost btn-sm" data-viewas="${c.id}" data-name="${esc(c.name)}">View as admin</button>
                 </div>
               </div>
@@ -208,7 +210,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
           const next = current.includes(addon) ? current.filter((a) => a !== addon) : [...current, addon];
           const { error } = await supabase.rpc('owner_set_addons', { p_club: id, p_addons: next });
           if (error) return toast(errMsg(error), 'err');
-          toast(`${addon} add-on ${next.includes(addon) ? 'ON' : 'off'}.`);
+          toast(`${addon} module ${next.includes(addon) ? 'ON' : 'off'}.`);
           render();
         })
       );
