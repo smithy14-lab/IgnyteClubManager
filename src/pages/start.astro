@@ -61,6 +61,24 @@ import IgnyteMark from '../components/IgnyteMark.astro';
         </select>
       </div>
       <div>
+        <label class="form-label">Your package <span class="text-mist-500 font-normal">— start free, add modules at £10/mo each</span></label>
+        <div class="flex flex-col gap-2 mt-1">
+          <label class="flex gap-2.5 items-start text-sm cursor-pointer rounded-lg border border-ink-700 p-2.5 has-checked:border-ignite-500/60">
+            <input type="checkbox" class="mt-0.5" data-wmod="privates" />
+            <span>⚡ 1-2-1 Private lessons <span class="block text-xs text-mist-500">slots, weekly series, skill journeys, invoicing &amp; payments</span></span>
+          </label>
+          <label class="flex gap-2.5 items-start text-sm cursor-pointer rounded-lg border border-ink-700 p-2.5 has-checked:border-ignite-500/60">
+            <input type="checkbox" class="mt-0.5" data-wmod="memberships" />
+            <span>💳 Memberships &amp; billing <span class="block text-xs text-mist-500">monthly billing on your chosen day, Direct Debit, late fees</span></span>
+          </label>
+          <label class="flex gap-2.5 items-start text-sm cursor-pointer rounded-lg border border-ink-700 p-2.5 has-checked:border-ignite-500/60">
+            <input type="checkbox" class="mt-0.5" data-wmod="websitepro" />
+            <span>🌐 Website Pro <span class="block text-xs text-mist-500">12 pages, your own domain, club mailbox, your branding</span></span>
+          </label>
+        </div>
+        <p class="text-xs text-mist-500 mt-1.5" id="w-mod-note">Free plan selected — you can add modules any time.</p>
+      </div>
+      <div>
         <label class="form-label" for="w-promo">Discount code (optional)</label>
         <input class="field uppercase" id="w-promo" maxlength="20" placeholder="e.g. CHEER50" />
         <p class="text-xs mt-1 hidden" id="w-promo-msg"></p>
@@ -109,6 +127,16 @@ import IgnyteMark from '../components/IgnyteMark.astro';
     });
     slugEl.addEventListener('input', () => (slugEl.dataset.touched = '1'));
 
+    const modBoxes = [...document.querySelectorAll<HTMLInputElement>('[data-wmod]')];
+    const modNote = document.getElementById('w-mod-note')!;
+    const updateModNote = () => {
+      const n = modBoxes.filter((b) => b.checked).length;
+      modNote.textContent = n
+        ? `Your package: £${n * 10}/mo — we'll be in touch to sort payment and switch ${n === 1 ? 'it' : 'them'} on.`
+        : 'Free plan selected — you can add modules any time.';
+    };
+    modBoxes.forEach((b) => b.addEventListener('change', updateModNote));
+
     promoEl.addEventListener('change', async () => {
       const code = promoEl.value.trim();
       promoMsg.classList.add('hidden');
@@ -124,14 +152,19 @@ import IgnyteMark from '../components/IgnyteMark.astro';
       }
     });
 
-    type Pending = { name: string; slug: string; disciplines: string[]; location: string; timezone: string; promo: string | null };
+    type Pending = { name: string; slug: string; disciplines: string[]; location: string; timezone: string; promo: string | null; modules: string[] };
 
     async function provision(p: Pending) {
-      const { data, error } = await supabase.rpc('provision_club', {
+      const base = {
         p_name: p.name, p_slug: p.slug, p_timezone: p.timezone,
         p_disciplines: p.disciplines, p_location: p.location || 'Main venue',
         p_promo: p.promo,
-      });
+      };
+      let { data, error } = await supabase.rpc('provision_club', { ...base, p_modules: p.modules ?? [] });
+      if (error && /function|p_modules|schema cache/i.test(error.message)) {
+        // DB not on v19 yet — create the club anyway, module picks just aren't recorded
+        ({ data, error } = await supabase.rpc('provision_club', base));
+      }
       if (error) {
         const msg = errMsg(error);
         throw new Error(msg.includes('duplicate') || msg.includes('unique') ? 'That link is taken — try another.' : msg);
@@ -158,6 +191,7 @@ import IgnyteMark from '../components/IgnyteMark.astro';
         location: (document.getElementById('w-loc') as HTMLInputElement).value.trim(),
         timezone: (document.getElementById('w-tz') as HTMLSelectElement).value,
         promo: promoEl.value.trim() || null,
+        modules: [...document.querySelectorAll<HTMLInputElement>('[data-wmod]:checked')].map((x) => x.dataset.wmod!),
       };
     }
 

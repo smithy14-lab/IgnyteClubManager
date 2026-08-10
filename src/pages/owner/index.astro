@@ -22,18 +22,18 @@ import AppLayout from '../../layouts/AppLayout.astro';
       contact_email: string | null; created_at: string; families: number; coaches: number;
       pending: number; bookings_per_week: number; last_booking_at: string | null;
     };
-    let extraByClub: Record<string, { addons: string[]; custom_domain: string | null; custom_domain_status: string | null; mailbox_alias: string | null; starter_status: string | null; promo_code: string | null }> = {};
+    let extraByClub: Record<string, { addons: string[]; requested_modules: string[]; custom_domain: string | null; custom_domain_status: string | null; mailbox_alias: string | null; starter_status: string | null; promo_code: string | null }> = {};
 
     async function render() {
       const [{ data: health }, { data: leads }, { data: audit }, { data: addonRows }, { data: promos }] = await Promise.all([
         supabase.rpc('owner_club_health'),
         supabase.from('club_leads').select('*').order('created_at', { ascending: false }).limit(30),
         supabase.from('owner_audit').select('*').order('created_at', { ascending: false }).limit(15),
-        supabase.from('clubs').select('id, addons, custom_domain, custom_domain_status, mailbox_alias, starter_status, promo_code'),
+        supabase.from('clubs').select('id, addons, requested_modules, custom_domain, custom_domain_status, mailbox_alias, starter_status, promo_code'),
         supabase.from('platform_promos').select('*').order('created_at', { ascending: false }),
       ]);
       extraByClub = Object.fromEntries(
-        (addonRows ?? []).map((r) => [r.id, { addons: r.addons ?? [], custom_domain: r.custom_domain, custom_domain_status: r.custom_domain_status, mailbox_alias: r.mailbox_alias, starter_status: r.starter_status, promo_code: r.promo_code }])
+        (addonRows ?? []).map((r) => [r.id, { addons: r.addons ?? [], requested_modules: r.requested_modules ?? [], custom_domain: r.custom_domain, custom_domain_status: r.custom_domain_status, mailbox_alias: r.mailbox_alias, starter_status: r.starter_status, promo_code: r.promo_code }])
       );
       const clubs = (health ?? []) as Club[];
       const liveClubs = clubs.filter((c) => c.status === 'active');
@@ -83,11 +83,15 @@ import AppLayout from '../../layouts/AppLayout.astro';
                     ${['active', 'suspended', 'churned'].map((st) => `<option value="${st}" ${st === c.status ? 'selected' : ''}>${st}</option>`).join('')}
                   </select>
                   <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('privates') ? '!text-ignite-400' : ''}"
-                    data-addon="privates:${c.id}" title="Toggle the Privates module (£8/mo)">⚡</button>
+                    data-addon="privates:${c.id}" title="Toggle the Privates module (£10/mo)">⚡</button>
                   <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('memberships') ? '!text-ignite-400' : ''}"
-                    data-addon="memberships:${c.id}" title="Toggle the Memberships & billing module (£8/mo)">💳</button>
+                    data-addon="memberships:${c.id}" title="Toggle the Memberships & billing module (£10/mo)">💳</button>
                   <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('websitepro') ? '!text-ignite-400' : ''}"
-                    data-addon="websitepro:${c.id}" title="Toggle the Website Pro module (£8/mo)">🌐</button>
+                    data-addon="websitepro:${c.id}" title="Toggle the Website Pro module (£10/mo)">🌐</button>
+                  ${(() => {
+                    const wants = (extraByClub[c.id]?.requested_modules ?? []).filter((m) => !(extraByClub[c.id]?.addons ?? []).includes(m));
+                    return wants.length ? `<span class="pill pill-warn" title="Picked at sign-up, not switched on yet — sort payment then use the toggles.">wants ${wants.join(' + ')}</span>` : '';
+                  })()}
                   <button class="btn btn-ghost btn-sm" data-viewas="${c.id}" data-name="${esc(c.name)}">View as admin</button>
                 </div>
               </div>

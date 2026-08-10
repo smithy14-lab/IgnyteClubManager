@@ -7,18 +7,18 @@ const free = {
   sub: 'a real club website and classes — actually free',
   features: [
     'A one-page club website — section builder, enquiry form, live timetable',
-    'Group classes: booking, registers & waiting lists',
-    'Club shop — kit & merch orders with stock and sizes',
+    '2 group classes with booking, registers & waiting lists',
+    'Club shop — your first 5 products, with stock and sizes',
     'Free taster trials with automatic follow-ups',
     'Club page, join codes & member approvals',
-    'Up to 30 athletes',
+    'Up to 20 athletes',
   ],
 };
 
 const club = {
   name: 'Club',
   price: '£35/mo',
-  sub: 'every module, unlimited athletes — the full club platform',
+  sub: 'every module, unlimited everything — the full club platform',
   features: [
     'All three modules included',
     'Unlimited athletes',
@@ -56,7 +56,7 @@ const modules = [
     <p class="eyebrow justify-center flex">Pricing</p>
     <h1 class="text-3xl mt-2">Build the package <span class="ignite-text">your club actually needs.</span></h1>
     <p class="mt-3 text-mist-400 max-w-lg mx-auto">
-      Start free, tick the modules you want at £8 a month each, or take the lot with Club.
+      Start free, tick the modules you want at £10 a month each, or take the lot with Club.
       No per-member fees. No card machine contracts.
     </p>
 
@@ -77,10 +77,10 @@ const modules = [
         <span class="pill pill-accent mb-3">Create your package</span>
         <h2 class="text-lg font-semibold">Build your own</h2>
         <p class="mt-1">
-          <span class="text-3xl font-display font-bold ignite-text" id="byo-total">£8</span>
+          <span class="text-3xl font-display font-bold ignite-text" id="byo-total">£10</span>
           <span class="text-sm text-mist-400">/mo</span>
         </p>
-        <p class="text-xs text-mist-500 mt-0.5">everything in Free + the modules you tick — £8/mo each</p>
+        <p class="text-xs text-mist-500 mt-0.5">everything in Free + the modules you tick — £10/mo each</p>
         <div class="mt-4 flex flex-col gap-3">
           {modules.map((m) => (
             <label class="flex gap-3 items-start cursor-pointer rounded-xl border border-ink-700 p-3 has-checked:border-ignite-500/60 has-checked:bg-ignite-500/5 transition-colors">
@@ -92,7 +92,7 @@ const modules = [
             </label>
           ))}
         </div>
-        <p class="text-xs text-mist-400 mt-3" id="byo-note">Any module also grows you from 30 to <b>100 athletes</b>.</p>
+        <p class="text-xs text-mist-400 mt-3" id="byo-note">Any module also unlocks <b>100 athletes</b>, unlimited classes and the full shop.</p>
         <p class="text-xs text-ignite-400 mt-1.5 hidden" id="byo-club-nudge">
           Ticking all three? Club gives you every module <b>plus unlimited athletes</b> for £35.
         </p>
@@ -142,7 +142,7 @@ const modules = [
     const nudge = document.getElementById('byo-club-nudge')!;
     const update = () => {
       const n = boxes.filter((b) => b.checked).length;
-      total.textContent = `£${n * 8}`;
+      total.textContent = `£${n * 10}`;
       nudge.classList.toggle('hidden', n < 3);
     };
     boxes.forEach((b) => b.addEventListener('change', update));
