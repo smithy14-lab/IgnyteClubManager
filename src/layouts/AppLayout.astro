@@ -23,7 +23,7 @@ const siteNav = [
   ['Contact', '/contact'],
 ];
 const appNav: [string, string, string][] = [
-  ['🏠 Dashboard', '/dashboard', 'parent,athlete,coach,admin,owner'],
+  ['🏠 Dashboard', '/dashboard', 'parent,athlete,coach,admin'],
   ['⚡ Book a lesson', '/book', 'parent,athlete'],
   ['🤸 Classes', '/classes', 'parent,athlete'],
   ['📅 My bookings', '/bookings', 'parent,athlete'],
@@ -35,7 +35,7 @@ const appNav: [string, string, string][] = [
   ['🔥 Skill journey', '/progress', 'parent,athlete'],
   ['📣 Coaching hub', '/coach', 'coach'],
   ['📋 Class registers', '/coach/classes', 'coach'],
-  ['🛠️ Club admin', '/admin', 'admin,owner'],
+  ['🛠️ Club admin', '/admin', 'admin'],
   ['👑 Owner HQ', '/owner', 'owner'],
 ];
 ---
@@ -349,17 +349,53 @@ const appNav: [string, string, string][] = [
             usable.find((m) => m.club_id === profile?.last_club_id) ??
             (usable.length === 1 ? usable[0] : undefined);
 
-          // role for nav = role in active club ('owner' opens everything)
-          const role = isOwner ? 'owner' : (active?.role ?? (usable.length ? 'parent' : 'none'));
+          // Owner "support key": a stored club they're NOT a member of means
+          // they're acting inside that club as its admin (View as admin).
+          let supportClub: { id: string; name: string; plan: string; accent_color: string | null } | null = null;
+          if (isOwner && !active && stored) {
+            const { data: sc } = await supabase.from('clubs').select('id, name, plan, accent_color').eq('id', stored).single();
+            supportClub = sc ?? null;
+            if (!sc) localStorage.removeItem('icm-active-club');
+          }
+
+          // role for nav: owner sees just Owner HQ unless they're inside a club
+          const role = isOwner
+            ? (supportClub ? 'admin' : (active?.role ?? 'owner'))
+            : (active?.role ?? (usable.length ? 'parent' : 'none'));
 
           // club branding in chrome
           const drawerClub = document.getElementById('drawer-club');
-          if (active && drawerClub) drawerClub.textContent = active.clubs.name;
-          if (active?.clubs.accent_color && active.clubs.plan !== 'free') {
+          if (drawerClub && (active || supportClub)) drawerClub.textContent = supportClub ? supportClub.name : active!.clubs.name;
+          if (drawerClub && isOwner && !active && !supportClub) drawerClub.textContent = 'Owner HQ';
+          const accent = supportClub ? supportClub.accent_color : active?.clubs.accent_color;
+          const accentPlan = supportClub ? supportClub.plan : active?.clubs.plan;
+          if (accent && accentPlan !== 'free') {
             const root = document.documentElement;
-            root.style.setProperty('--color-ignite-500', active.clubs.accent_color);
-            root.style.setProperty('--color-ignite-600', active.clubs.accent_color);
-            root.style.setProperty('--color-ignite-400', active.clubs.accent_color);
+            root.style.setProperty('--color-ignite-500', accent);
+            root.style.setProperty('--color-ignite-600', accent);
+            root.style.setProperty('--color-ignite-400', accent);
+          }
+
+          // Acting-as banner: always visible while the support key is in play.
+          if (supportClub) {
+            const { data: grants } = await supabase
+              .from('owner_support_grants')
+              .select('expires_at')
+              .eq('club_id', supportClub.id)
+              .gt('expires_at', new Date().toISOString())
+              .order('expires_at', { ascending: false })
+              .limit(1);
+            const exp = grants?.[0]?.expires_at;
+            const mins = exp ? Math.max(1, Math.round((new Date(exp).getTime() - Date.now()) / 60000)) : 0;
+            const bar = document.createElement('div');
+            bar.className = 'sticky top-16 z-30 bg-charge-400/15 border-b border-charge-400/40 text-charge-400 text-xs font-semibold py-1.5 px-4 flex items-center justify-center gap-3 flex-wrap';
+            bar.innerHTML = `<span>🔑 Acting as club admin — ${esc(supportClub.name)} · ${exp ? `${mins} min support window (changes are logged)` : 'read-only (no support window)'}</span>
+              <button id="support-exit" class="underline underline-offset-2">Exit to Owner HQ</button>`;
+            document.querySelector('main')?.before(bar);
+            document.getElementById('support-exit')?.addEventListener('click', () => {
+              localStorage.removeItem('icm-active-club');
+              location.href = '/owner';
+            });
           }
 
           // switcher (2+ clubs, or owner)
@@ -393,7 +429,8 @@ const appNav: [string, string, string][] = [
           document.getElementById('notif-btn')?.classList.remove('hidden');
           drawer?.querySelectorAll<HTMLElement>('[data-roles]').forEach((el) => {
             const roles = (el.dataset.roles ?? '').split(',');
-            if (roles.includes(role) || (role === 'owner' && !roles.includes('owner-only-never'))) {
+            // owners always keep their Owner HQ link, even while inside a club
+            if (roles.includes(role) || (isOwner && roles.includes('owner'))) {
               el.classList.remove('hidden');
             }
           });

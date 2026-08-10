@@ -137,11 +137,17 @@ export async function requireAuth(clubRoles?: ClubRole[] | 'any'): Promise<AuthC
       accent_color: chosen.clubs.accent_color,
       logo_path: chosen.clubs.logo_path,
     };
-  } else if (isOwner && urlClub) {
-    // Owner entering a club they're not a member of (support access).
-    const { data: c } = await supabase.from('clubs').select('*').eq('id', urlClub).single();
-    if (c) {
-      club = { id: c.id, name: c.name, slug: c.slug, status: c.status, plan: c.plan, role: 'owner', accent_color: c.accent_color, logo_path: c.logo_path };
+  } else if (isOwner) {
+    // Owner acting inside a club they're not a member of (support access).
+    // The "key" is ?club= on entry, then localStorage so it survives navigation.
+    const supportId = urlClub ?? storedClubId();
+    if (supportId) {
+      const { data: c } = await supabase.from('clubs').select('*').eq('id', supportId).single();
+      if (c) {
+        club = { id: c.id, name: c.name, slug: c.slug, status: c.status, plan: c.plan, role: 'owner', accent_color: c.accent_color, logo_path: c.logo_path };
+      } else {
+        localStorage.removeItem(CLUB_KEY);
+      }
     }
   }
 

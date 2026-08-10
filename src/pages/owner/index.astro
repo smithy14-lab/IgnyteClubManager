@@ -238,12 +238,13 @@ import AppLayout from '../../layouts/AppLayout.astro';
       );
       content.querySelectorAll<HTMLButtonElement>('[data-viewas]').forEach((b) =>
         b.addEventListener('click', async () => {
-          if (confirm(`Open ${b.dataset.name} as admin?\n\nOK = grant yourself a 60-minute SUPPORT window (you can make changes; everything is logged).\nCancel = read-only view.`)) {
+          if (confirm(`Step into ${b.dataset.name} as its club admin?\n\nOK = grant yourself a 60-minute SUPPORT window (you can make changes; everything is logged).\nCancel = read-only look around.`)) {
             const { error } = await supabase.rpc('owner_grant_support', { p_club: b.dataset.viewas, p_minutes: 60 });
             if (error) return toast(errMsg(error), 'err');
           }
+          // the "key": stored club id + support grant; opens in its own tab
           localStorage.setItem('icm-active-club', b.dataset.viewas!);
-          location.href = `/admin?club=${b.dataset.viewas}`;
+          window.open(`/dashboard?club=${b.dataset.viewas}`, '_blank');
         })
       );
       content.querySelectorAll<HTMLButtonElement>('[data-lead]').forEach((b) =>
