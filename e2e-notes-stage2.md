@@ -1,0 +1,25 @@
+# Stage 2 — migration drive (2026-08-10T08:59:59.411Z)
+
+- Signed in as founder -> /dashboard
+-   📸 stage2-01-import-page
+- Coach invite -> "Coach invited — they've got mail. 📧"
+-   📸 stage2-02-coach-invited
+- Slot dropdown for Casey -> "This coach has no upcoming slots — create them under Admin → Slots"
+-   📸 stage2-03-family-filled
+- Family import -> "Add at least one athlete (name + date of birth)."
+-   📸 stage2-04-family-imported
+-   📸 stage2-05-admin-after-import
+-   [console] Failed to load resource: the server responded with a status of 404 (Not Found)
+- Admin page mentions Casey: false, Probe family: false
+- Signed in as founder
+- Casey Coach in family coach dropdown: true
+-   📸 stage2-06-family-filled
+- Family import -> "Family attached — 2 athlete(s)."
+-   📸 stage2-07-family-imported
+- Club: Blaze Cheer Academy
+-   member: Nathan Test <smithy.ns83+club@gmail.com> — admin (active)
+-   member: Casey Coach <smithy.ns83+coach@gmail.com> — coach (active)
+-   member: Probe One <smithy.ns83+probe1@gmail.com> — parent (active)
+-   athlete enrolled: Ava Probe (dob 2015-04-12)
+-   athlete enrolled: Max Probe (dob 2017-09-30)
+-   📸 stage2-08-admin-people
