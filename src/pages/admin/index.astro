@@ -3,28 +3,57 @@ import AppLayout from '../../layouts/AppLayout.astro';
 ---
 
 <AppLayout title="Club admin">
-  <p class="eyebrow">Club admin</p>
-  <h1 class="text-2xl mt-1 mb-5">Manage the club</h1>
+  <div class="flex items-center justify-between gap-2 mt-1 mb-5">
+    <div><p class="eyebrow">Club admin</p><h1 class="text-2xl mt-1">Manage the club</h1></div>
+    <a href="/dashboard" class="btn btn-ghost btn-sm">← Today</a>
+  </div>
 
-  <div class="flex flex-wrap gap-2 mb-5">
-    <button data-tab="slots" class="tab-btn btn btn-primary btn-sm">Slots</button>
-    <a href="/admin/classes" class="btn btn-ghost btn-sm">Classes ↗</a>
-    <a href="/admin/money" class="btn btn-ghost btn-sm">Money ↗</a>
-    <a href="/admin/import" class="btn btn-ghost btn-sm">Import ↗</a>
-    <a href="/admin/website" class="btn btn-ghost btn-sm">Website ↗</a>
-    <a href="/admin/shop" class="btn btn-ghost btn-sm">Shop ↗</a>
-    <a href="/admin/events" class="btn btn-ghost btn-sm">Events ↗</a>
-    <button data-tab="bookings" class="tab-btn btn btn-ghost btn-sm">Bookings</button>
-    <button data-tab="people" class="tab-btn btn btn-ghost btn-sm">People</button>
-    <button data-tab="broadcasts" class="tab-btn btn btn-ghost btn-sm">Messages</button>
-    <button data-tab="locations" class="tab-btn btn btn-ghost btn-sm">Locations</button>
-    <button data-tab="branding" class="tab-btn btn btn-ghost btn-sm">Branding</button>
-    <button data-tab="skills" class="tab-btn btn btn-ghost btn-sm">Skills</button>
-    <button data-tab="export" class="tab-btn btn btn-ghost btn-sm">Export</button>
-    <button data-tab="settings" class="tab-btn btn btn-ghost btn-sm">Settings</button>
+  <div class="flex flex-col gap-2.5 mb-6">
+    <div class="admin-group">
+      <span class="admin-group-label">📅 Schedule</span>
+      <button data-tab="slots" class="tab-btn btn btn-ghost btn-sm">1-2-1 slots</button>
+      <a href="/admin/classes" class="btn btn-ghost btn-sm">Group classes</a>
+      <button data-tab="bookings" class="tab-btn btn btn-ghost btn-sm">Take register</button>
+    </div>
+    <div class="admin-group">
+      <span class="admin-group-label">👥 People</span>
+      <button data-tab="people" class="tab-btn btn btn-ghost btn-sm">Members &amp; coaches</button>
+      <a href="/admin/import" class="btn btn-ghost btn-sm">Add &amp; import</a>
+    </div>
+    <div class="admin-group">
+      <span class="admin-group-label">💷 Money</span>
+      <a href="/admin/money" class="btn btn-ghost btn-sm">Invoices &amp; memberships</a>
+    </div>
+    <div class="admin-group">
+      <span class="admin-group-label">🌐 Your club</span>
+      <a href="/admin/website" class="btn btn-ghost btn-sm">Website</a>
+      <a href="/admin/shop" class="btn btn-ghost btn-sm">Shop</a>
+      <a href="/admin/events" class="btn btn-ghost btn-sm">Events</a>
+      <button data-tab="branding" class="tab-btn btn btn-ghost btn-sm">Branding &amp; join</button>
+    </div>
+    <div class="admin-group">
+      <span class="admin-group-label">📣 Comms</span>
+      <button data-tab="broadcasts" class="tab-btn btn btn-ghost btn-sm">Messages</button>
+    </div>
+    <div class="admin-group">
+      <span class="admin-group-label">⚙️ Setup</span>
+      <button data-tab="locations" class="tab-btn btn btn-ghost btn-sm">Locations</button>
+      <button data-tab="skills" class="tab-btn btn btn-ghost btn-sm">Skills</button>
+      <button data-tab="export" class="tab-btn btn btn-ghost btn-sm">Export</button>
+      <button data-tab="settings" class="tab-btn btn btn-ghost btn-sm">Settings</button>
+    </div>
   </div>
 
   <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
+
+  <style>
+    .admin-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+    .admin-group-label {
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--color-mist-500); width: 6.5rem; flex-shrink: 0;
+    }
+    @media (max-width: 480px) { .admin-group-label { width: 100%; margin-bottom: -0.1rem; } }
+  </style>
 
   <script>
     import { supabase } from '../../lib/supabase';
@@ -39,11 +68,15 @@ import AppLayout from '../../layouts/AppLayout.astro';
     type Loc = { id: string; name: string; address: string | null; active: boolean };
     let locations: Loc[] = [];
 
+    function highlightTab() {
+      document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((x) => {
+        x.className = `tab-btn btn ${x.dataset.tab === tab ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+      });
+    }
     document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((b) =>
       b.addEventListener('click', () => {
         tab = b.dataset.tab!;
-        document.querySelectorAll('.tab-btn').forEach((x) => (x.className = 'tab-btn btn btn-ghost btn-sm'));
-        b.className = 'tab-btn btn btn-primary btn-sm';
+        highlightTab();
         render();
       })
     );
@@ -1057,6 +1090,9 @@ import AppLayout from '../../layouts/AppLayout.astro';
     (async () => {
       ctx = await requireAuth(['admin']);
       clubId = ctx.club!.id;
+      const urlTab = new URLSearchParams(location.search).get('tab');
+      if (urlTab && document.querySelector(`.tab-btn[data-tab="${urlTab}"]`)) tab = urlTab;
+      highlightTab();
       await render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');

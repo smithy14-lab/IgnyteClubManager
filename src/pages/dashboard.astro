@@ -196,36 +196,100 @@ import AppLayout from '../layouts/AppLayout.astro';
       }
 
       if (role === 'admin') {
-        const [{ count: slotCount }, { count: bookingCount }, { count: waitCount }, { count: memberCount }, { count: pendingCount }] =
-          await Promise.all([
-            supabase.from('slots').select('*', { count: 'exact', head: true }).eq('club_id', club.id).gte('slot_date', today),
-            supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'booked'),
-            supabase.from('waitlist').select('*', { count: 'exact', head: true }).eq('club_id', club.id).in('status', ['waiting', 'offered']),
-            supabase.from('club_members').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'active'),
-            supabase.from('club_members').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'pending'),
-          ]);
-        if ((pendingCount ?? 0) > 0) {
-          html += `<div class="surface-card p-4 mb-4 border-ignite-500/40"><p class="text-sm">⏳ <b>${pendingCount}</b> join request${pendingCount === 1 ? '' : 's'} waiting — <a class="text-ignite-400" href="/admin">approve in Admin → People</a></p></div>`;
+        const [
+          { data: summary },
+          { count: pendingCount },
+          { count: memberCount },
+          { data: slotBoard },
+          { data: classSessions },
+          { data: settings },
+        ] = await Promise.all([
+          supabase.rpc('admin_money_summary', { p_club: club.id }),
+          supabase.from('club_members').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'pending'),
+          supabase.from('club_members').select('*', { count: 'exact', head: true }).eq('club_id', club.id).eq('status', 'active'),
+          supabase.rpc('get_slot_board', { p_club: club.id, p_from: today, p_to: today }),
+          supabase
+            .from('class_sessions')
+            .select('id, start_time, end_time, class_groups(name)')
+            .eq('club_id', club.id)
+            .eq('session_date', today)
+            .eq('cancelled', false),
+          supabase.from('club_settings').select('currency').eq('club_id', club.id).single(),
+        ]);
+        const sym = settings?.currency ?? '£';
+        const money = (n: unknown) => sym + Number(n ?? 0).toFixed(2);
+        const s = (summary ?? {}) as { due?: number; overdue?: number; paid_30d?: number; debtors?: { name: string; owed: number; has_overdue: boolean }[] };
+        const owed = Number(s.due ?? 0) + Number(s.overdue ?? 0);
+        const overdueCount = (s.debtors ?? []).filter((d) => d.has_overdue).length;
+
+        // ---- "Needs you" — only the things that actually need an action today
+        const actions: string[] = [];
+        if ((pendingCount ?? 0) > 0)
+          actions.push(`<a href="/admin?tab=people" class="flex items-center justify-between gap-3 rounded-lg border border-ink-700 px-3 py-2.5">
+            <span><b>${pendingCount}</b> join request${pendingCount === 1 ? '' : 's'} waiting</span>
+            <span class="btn btn-primary btn-sm">Review →</span></a>`);
+        if (overdueCount > 0)
+          actions.push(`<a href="/admin/money" class="flex items-center justify-between gap-3 rounded-lg border border-ink-700 px-3 py-2.5">
+            <span><b>${overdueCount}</b> famil${overdueCount === 1 ? 'y' : 'ies'} overdue · ${money(s.overdue)}</span>
+            <span class="btn btn-primary btn-sm">Chase →</span></a>`);
+
+        if (actions.length) {
+          html += `<div class="surface-card p-5 mb-5 border-ignite-500/40" style="box-shadow: var(--shadow-glow)">
+            <h2 class="text-base font-semibold text-ignite-400 mb-1">Needs you</h2>
+            <div class="mt-2 flex flex-col gap-2">${actions.join('')}</div>
+          </div>`;
         }
-        html += `<div class="grid gap-4 grid-cols-2 sm:grid-cols-4">
+
+        // ---- On today — group classes and 1-2-1 privates in one list
+        type TodayItem = { time: string; title: string; sub: string; href: string; kind: string };
+        const items: TodayItem[] = [];
+        for (const c of (classSessions ?? []) as unknown as { id: string; start_time: string; end_time: string; class_groups: { name: string } | null }[]) {
+          items.push({ time: c.start_time, title: c.class_groups?.name ?? 'Class', sub: `${fmtTime(c.start_time)}–${fmtTime(c.end_time)} · group class`, href: '/admin/classes', kind: '🤸' });
+        }
+        for (const sl of (slotBoard ?? []) as { start_time: string; end_time: string; booked: number; capacity: number; coaches: { name: string }[] }[]) {
+          items.push({ time: sl.start_time, title: `1-2-1 · ${fmtTime(sl.start_time)}`, sub: `${sl.booked}/${sl.capacity} booked${sl.coaches.length ? ' · ' + sl.coaches.map((c) => esc(c.name)).join(', ') : ''}`, href: '/admin?tab=bookings', kind: '⚡' });
+        }
+        items.sort((a, b) => a.time.localeCompare(b.time));
+
+        html += `<div class="surface-card p-5 mb-5">
+          <h2 class="text-base font-semibold mb-3">On today (${items.length})</h2>
+          ${
+            items.length
+              ? items
+                  .map(
+                    (i) => `
+              <a href="${i.href}" class="flex items-center justify-between gap-3 py-2.5 border-t border-ink-700 first:border-0 hover:text-ignite-400">
+                <div><p class="text-sm font-medium">${i.kind} ${esc(i.title)}</p><p class="text-xs text-mist-500 mt-0.5">${i.sub}</p></div>
+                <span class="text-xs text-mist-400">Register →</span>
+              </a>`
+                  )
+                  .join('')
+              : '<p class="text-sm text-mist-500">Nothing scheduled today. <a class="text-ignite-400" href="/admin/classes">Add a class</a> or <a class="text-ignite-400" href="/admin?tab=slots">private slots</a>.</p>'
+          }
+        </div>
+
+        <div class="grid gap-4 grid-cols-3 mb-5">
           ${[
-            ['Upcoming slots', slotCount],
-            ['Active bookings', bookingCount],
-            ['On waiting lists', waitCount],
-            ['Members', memberCount],
+            ['Owed', money(owed), overdueCount ? `${money(s.overdue)} overdue` : 'up to date'],
+            ['Collected (30d)', money(s.paid_30d), 'paid'],
+            ['Members', String(memberCount ?? 0), 'active'],
           ]
             .map(
-              ([label, n]) => `
-            <div class="surface-card p-5 text-center">
-              <p class="text-3xl font-display font-semibold ignite-text">${n ?? 0}</p>
-              <p class="text-xs text-mist-400 mt-1">${label}</p>
+              ([label, big, sub]) => `
+            <div class="surface-card p-4 text-center">
+              <p class="text-xl sm:text-2xl font-display font-semibold ignite-text">${big}</p>
+              <p class="text-[0.68rem] text-mist-400 mt-0.5">${label} · ${sub}</p>
             </div>`
             )
             .join('')}
         </div>
-        <div class="mt-5 flex flex-wrap gap-3">
-          <a href="/admin" class="btn btn-primary">Manage the club</a>
-          <a href="/c/${esc(club.slug)}" class="btn btn-ghost">View public portal</a>
+
+        <div class="flex flex-wrap gap-2">
+          <a href="/admin/classes" class="btn btn-ghost btn-sm">＋ Class</a>
+          <a href="/admin?tab=slots" class="btn btn-ghost btn-sm">＋ Private slots</a>
+          <a href="/admin/money" class="btn btn-ghost btn-sm">＋ Invoice</a>
+          <a href="/admin?tab=people" class="btn btn-ghost btn-sm">Invite people</a>
+          <a href="/admin" class="btn btn-primary btn-sm ml-auto">Manage the club →</a>
         </div>`;
       }
 
