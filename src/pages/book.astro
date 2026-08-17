@@ -2,10 +2,13 @@
 import AppLayout from '../layouts/AppLayout.astro';
 ---
 
-<AppLayout title="Book a lesson">
-  <p class="eyebrow">Booking</p>
-  <div class="flex flex-wrap items-center justify-between gap-3 mt-1 mb-5">
-    <h1 class="text-2xl">Find a lesson</h1>
+<AppLayout title="Book a 1-2-1">
+  <div class="flex items-center gap-2 mt-1 mb-1">
+    <a href="/bookings" class="btn btn-ghost btn-sm">← My 1-2-1s</a>
+    <p class="eyebrow">Private 1-2-1</p>
+  </div>
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+    <h1 class="text-2xl">Book a lesson</h1>
     <div id="view-toggle"></div>
   </div>
 

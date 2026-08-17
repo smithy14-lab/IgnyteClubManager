@@ -2,9 +2,12 @@
 import AppLayout from '../layouts/AppLayout.astro';
 ---
 
-<AppLayout title="My bookings">
-  <p class="eyebrow">Your lessons</p>
-  <h1 class="text-2xl mt-1 mb-5">Bookings &amp; waiting list</h1>
+<AppLayout title="Private 1-2-1">
+  <p class="eyebrow">Private 1-2-1</p>
+  <div class="flex items-center justify-between gap-2 mt-1 mb-5">
+    <h1 class="text-2xl">Your 1-2-1 lessons</h1>
+    <a href="/book" class="btn btn-primary btn-sm">＋ Book a lesson</a>
+  </div>
   <div id="content"><p class="text-mist-500 text-sm">Loading…</p></div>
 
   <script>
