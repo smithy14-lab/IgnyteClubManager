@@ -57,7 +57,8 @@ import AppLayout from '../../layouts/AppLayout.astro';
         </div>
 
         <div class="surface-card p-5 mb-5">
-          <h2 class="text-base font-semibold mb-3">🏟️ Clubs</h2>
+          <h2 class="text-base font-semibold mb-1">🏟️ Clubs</h2>
+          <p class="text-xs text-mist-500 mb-3">A free/small club's package = exactly the lit modules — that's all its parents & coaches see. (Club/comped plans unlock everything.) For a 1-2-1-only customer: set plan <b>free</b> and light only ⚡.</p>
           <div style="overflow-x:auto">
           ${clubs
             .map((c) => {
@@ -82,12 +83,19 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   <select class="field !w-auto !py-1 !text-xs" data-status="${c.id}">
                     ${['active', 'suspended', 'churned'].map((st) => `<option value="${st}" ${st === c.status ? 'selected' : ''}>${st}</option>`).join('')}
                   </select>
-                  <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('privates') ? '!text-ignite-400' : ''}"
-                    data-addon="privates:${c.id}" title="Toggle the Privates module (£10/mo)">⚡</button>
-                  <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('memberships') ? '!text-ignite-400' : ''}"
-                    data-addon="memberships:${c.id}" title="Toggle the Memberships & billing module (£10/mo)">💳</button>
-                  <button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes('websitepro') ? '!text-ignite-400' : ''}"
-                    data-addon="websitepro:${c.id}" title="Toggle the Website Pro module (£10/mo)">🌐</button>
+                  ${[
+                    ['privates', '⚡', '1-2-1 lessons'],
+                    ['classes', '🤸', 'Group classes'],
+                    ['enrolments', '🎽', 'Teams / enrolments'],
+                    ['memberships', '💳', 'Memberships & billing'],
+                    ['shop', '🛍️', 'Shop'],
+                    ['events', '🎪', 'Events'],
+                    ['website', '📄', 'Website (1 page)'],
+                    ['websitepro', '🌐', 'Website Pro'],
+                  ].map(([key, icon, label]) =>
+                    `<button class="btn btn-ghost btn-sm ${(extraByClub[c.id]?.addons ?? []).includes(key) ? '!text-ignite-400' : '!text-mist-600'}"
+                      data-addon="${key}:${c.id}" title="Toggle ${label} — the club's package is exactly the lit modules">${icon}</button>`
+                  ).join('')}
                   ${(() => {
                     const wants = (extraByClub[c.id]?.requested_modules ?? []).filter((m) => !(extraByClub[c.id]?.addons ?? []).includes(m));
                     return wants.length ? `<span class="pill pill-warn" title="Picked at sign-up, not switched on yet — sort payment then use the toggles.">wants ${wants.join(' + ')}</span>` : '';
