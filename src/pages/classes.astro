@@ -189,7 +189,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     }
 
     (async () => {
-      ctx = await requireAuth(['parent', 'athlete', 'admin']);
+      ctx = await requireAuth(['parent', 'athlete', 'admin'], 'classes');
       await render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');

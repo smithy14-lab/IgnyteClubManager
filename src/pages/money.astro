@@ -278,7 +278,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     }
 
     (async () => {
-      ctx = await requireAuth('any');
+      ctx = await requireAuth('any', 'payments');
       await confirmCardReturn();
       await render();
     })().catch((e) => {

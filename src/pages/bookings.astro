@@ -16,7 +16,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     let cancelNoticeHours = 24;
 
     async function render() {
-      const ctx = await requireAuth('any');
+      const ctx = await requireAuth('any', 'privates');
       club = ctx.club!;
       const athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
       const ids = athletes.map((a) => a.id);

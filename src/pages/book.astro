@@ -479,7 +479,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     );
 
     (async () => {
-      const ctx = await requireAuth('any');
+      const ctx = await requireAuth('any', 'privates');
       club = ctx.club!;
       athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
       const { data: settings } = await supabase

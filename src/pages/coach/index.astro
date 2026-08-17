@@ -504,7 +504,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
     });
 
     (async () => {
-      const ctx = await requireAuth(['coach', 'admin']);
+      const ctx = await requireAuth(['coach', 'admin'], 'privates');
       me = { id: ctx.profile.id };
       club = ctx.club!;
       await render();

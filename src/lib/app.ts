@@ -130,7 +130,7 @@ export function applyClubBranding(club: ActiveClub | null): void {
  * clubRoles: which roles-in-club may view this page ('any' = any member).
  * The platform owner passes every check; with ?club= they can enter any club.
  */
-export async function requireAuth(clubRoles?: ClubRole[] | 'any'): Promise<AuthCtx> {
+export async function requireAuth(clubRoles?: ClubRole[] | 'any', feature?: Feature): Promise<AuthCtx> {
   if (!supabaseConfigured) {
     document.body.innerHTML =
       '<div style="padding:4rem 1.5rem;text-align:center;font-family:system-ui">' +
@@ -213,6 +213,13 @@ export async function requireAuth(clubRoles?: ClubRole[] | 'any'): Promise<AuthC
       location.href = '/dashboard';
       throw new Error('redirecting');
     }
+  }
+
+  // Feature gate: a page for a module the club's package doesn't include is
+  // off-limits even by direct URL. Owners bypass (they can see everything).
+  if (feature && club && club.role !== 'owner' && !hasFeature(club, feature)) {
+    location.href = '/dashboard';
+    throw new Error('redirecting');
   }
 
   return { profile: profile as Profile, memberships: all, club };

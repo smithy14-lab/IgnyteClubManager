@@ -265,7 +265,7 @@ import AppLayout from '../layouts/AppLayout.astro';
     }
 
     (async () => {
-      const ctx = await requireAuth('any');
+      const ctx = await requireAuth('any', 'progress');
       club = ctx.club!;
       const athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
       if (!athletes.length) {

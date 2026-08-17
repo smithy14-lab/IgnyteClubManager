@@ -175,7 +175,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
     }
 
     (async () => {
-      ctx = await requireAuth(['admin']);
+      ctx = await requireAuth(['admin'], 'shop');
       await render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
