@@ -617,7 +617,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
               const cp = cpMap.get(m.profile_id);
               const u = m.profiles as unknown as { full_name: string; email: string; phone: string | null };
               return `
-            <div class="py-3 border-t border-ink-700">
+            <div class="py-3 border-t border-ink-700" data-mcard="${m.profile_id}">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p class="text-sm font-medium">${esc(u.full_name)}</p>
@@ -629,9 +629,15 @@ import AppLayout from '../../layouts/AppLayout.astro';
                   <select class="field !w-auto !py-1 !text-xs" data-user="${m.profile_id}">
                     ${['parent', 'athlete', 'coach', 'admin'].map((r) => `<option value="${r}" ${r === m.role ? 'selected' : ''}>${r}</option>`).join('')}
                   </select>
+                  <button class="btn btn-ghost btn-sm" data-person-edit="${m.profile_id}">Details</button>
                   ${m.role === 'coach' ? `<button class="btn btn-ghost btn-sm" data-coach-edit="${m.profile_id}">Coach profile</button>` : ''}
                   <button class="btn btn-danger btn-sm" data-remove-member="${m.profile_id}">Remove</button>
                 </div>
+              </div>
+              <div class="person-editor hidden mt-3 p-3 rounded-lg bg-ink-900 border border-ink-700 flex flex-wrap gap-2 items-end">
+                <div><label class="form-label">Name</label><input class="field !py-1.5 !text-sm" data-pf="name" value="${esc(u.full_name)}" /></div>
+                <div><label class="form-label">Phone</label><input class="field !py-1.5 !text-sm" data-pf="phone" value="${esc(u.phone ?? '')}" /></div>
+                <button class="btn btn-primary btn-sm" data-person-save="${m.profile_id}">Save details</button>
               </div>
               ${
                 m.role === 'coach'
@@ -731,6 +737,23 @@ import AppLayout from '../../layouts/AppLayout.astro';
           const { error } = await supabase.rpc('set_member_role', { p_club: clubId, p_profile: sel.dataset.user, p_role: sel.value });
           if (error) return toast(errMsg(error), 'err');
           toast('Role updated.');
+          render();
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-person-edit]').forEach((b) =>
+        b.addEventListener('click', () =>
+          content.querySelector(`[data-mcard="${b.dataset.personEdit}"] .person-editor`)?.classList.toggle('hidden')
+        )
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-person-save]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const ed = content.querySelector(`[data-mcard="${b.dataset.personSave}"] .person-editor`)!;
+          const val = (f: string) => (ed.querySelector(`[data-pf="${f}"]`) as HTMLInputElement).value;
+          const { error } = await supabase.rpc('admin_update_person', {
+            p_club: clubId, p_profile: b.dataset.personSave, p_name: val('name'), p_phone: val('phone'),
+          });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Details updated.');
           render();
         })
       );
