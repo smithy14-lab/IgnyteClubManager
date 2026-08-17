@@ -47,6 +47,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       toast,
       errMsg,
       todayISO,
+      ageFromDob,
       skillStatusLabels,
       skillStatusOrder,
     } from '../../lib/app';
@@ -149,7 +150,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
       from.setDate(from.getDate() - 7); // last week still needs its register
       const { data } = await supabase
         .from('bookings')
-        .select('*, slots(slot_date, start_time, end_time, locations(name)), athletes(id, name, medical_notes, notes)')
+        .select('*, slots(slot_date, start_time, end_time, locations(name)), athletes(id, name, dob, medical_notes, notes, parent_id, profile_id)')
         .eq('club_id', club.id)
         .eq('coach_id', me.id)
         .eq('status', 'booked')
@@ -185,32 +186,36 @@ import AppLayout from '../../layouts/AppLayout.astro';
               // only after the lesson's end time counts as past (register due)
               const past = date < today || (date === today && b.slots.end_time <= new Date().toTimeString().slice(0, 8));
               return `
-            <div class="surface-card p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="font-display font-semibold">${fmtTime(b.slots.start_time)}–${fmtTime(b.slots.end_time)} — ${esc(b.athletes?.name)}
-                  ${b.athletes?.medical_notes ? `<span class="pill pill-warn ml-1" title="${esc(b.athletes.medical_notes)}">🚑 medical</span>` : ''}
-                </p>
-                <p class="text-xs text-mist-500 mt-0.5">${esc(b.slots.locations?.name ?? '')}${b.discipline_focus ? ` · ${b.discipline_focus === 'both' ? 'tumble + dance' : b.discipline_focus}` : ''}</p>
-                ${b.athletes?.medical_notes ? `<p class="text-xs text-charge-400 mt-0.5">🚑 ${esc(b.athletes.medical_notes)}</p>` : ''}
-                ${
-                  b.attendance
-                    ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'} mt-1">${{ present: 'Present', absent: 'Absent', ill: '🤒 Ill', injured: '🩹 Injured' }[b.attendance as string] ?? b.attendance}</span>`
-                    : past
-                      ? '<span class="pill pill-warn mt-1">Register due</span>'
-                      : ''
-                }
+            <div class="surface-card p-4" data-lessoncard="${b.id}">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="font-display font-semibold">${fmtTime(b.slots.start_time)}–${fmtTime(b.slots.end_time)} — ${esc(b.athletes?.name)}
+                    ${b.athletes?.medical_notes ? '<span class="pill pill-warn ml-1">🚑 medical</span>' : ''}
+                  </p>
+                  <p class="text-xs text-mist-500 mt-0.5">${esc(b.slots.locations?.name ?? '')}${b.discipline_focus ? ` · ${b.discipline_focus === 'both' ? 'tumble + dance' : b.discipline_focus}` : ''}</p>
+                  ${b.athletes?.medical_notes ? `<p class="text-xs text-charge-400 mt-0.5">🚑 ${esc(b.athletes.medical_notes)}</p>` : ''}
+                  ${
+                    b.attendance
+                      ? `<span class="pill ${b.attendance === 'present' ? 'pill-success' : 'pill-danger'} mt-1">${{ present: 'Present', absent: 'Absent', ill: '🤒 Ill', injured: '🩹 Injured' }[b.attendance as string] ?? b.attendance}</span>`
+                      : past
+                        ? '<span class="pill pill-warn mt-1">Register due</span>'
+                        : ''
+                  }
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  ${
+                    past
+                      ? `<button class="btn btn-ghost btn-sm" data-present="${b.id}">Present</button>
+                         <button class="btn btn-ghost btn-sm" data-absent="${b.id}">Absent</button>
+                         <button class="btn btn-ghost btn-sm" data-ill="${b.id}" title="Off ill">🤒</button>
+                         <button class="btn btn-ghost btn-sm" data-injured="${b.id}" title="Injured">🩹</button>`
+                      : `<button class="btn btn-danger btn-sm" data-coach-cancel="${b.id}">Cancel</button>`
+                  }
+                  <button class="btn btn-ghost btn-sm" data-contact="${b.athletes?.id}:${b.athletes?.dob}" title="Contact & medical">ℹ️</button>
+                  <button class="btn btn-primary btn-sm" data-progress="${b.athletes?.id}" data-booking="${b.id}" data-name="${esc(b.athletes?.name)}">Progress</button>
+                </div>
               </div>
-              <div class="flex flex-wrap gap-2">
-                ${
-                  past
-                    ? `<button class="btn btn-ghost btn-sm" data-present="${b.id}">Present</button>
-                       <button class="btn btn-ghost btn-sm" data-absent="${b.id}">Absent</button>
-                       <button class="btn btn-ghost btn-sm" data-ill="${b.id}" title="Off ill">🤒</button>
-                       <button class="btn btn-ghost btn-sm" data-injured="${b.id}" title="Injured">🩹</button>`
-                    : `<button class="btn btn-danger btn-sm" data-coach-cancel="${b.id}">Cancel</button>`
-                }
-                <button class="btn btn-primary btn-sm" data-progress="${b.athletes?.id}" data-booking="${b.id}" data-name="${esc(b.athletes?.name)}">Progress</button>
-              </div>
+              <div class="contact-panel hidden mt-2 rounded-lg bg-ink-900 border border-ink-700 p-3 text-xs"></div>
             </div>`;
             })
             .join('')}
@@ -245,6 +250,34 @@ import AppLayout from '../../layouts/AppLayout.astro';
           openProgress(b.dataset.progress!, b.dataset.name ?? '', b.dataset.booking!)
         )
       );
+      content.querySelectorAll<HTMLButtonElement>('[data-contact]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [aid, dob] = b.dataset.contact!.split(':');
+          const panel = b.closest('[data-lessoncard]')!.querySelector('.contact-panel') as HTMLElement;
+          if (!panel.classList.contains('hidden')) return panel.classList.add('hidden');
+          panel.classList.remove('hidden');
+          panel.innerHTML = await coachContactHtml(aid, dob);
+        })
+      );
+    }
+
+    // Contact for the coach: parent's contact when the athlete is under 16,
+    // otherwise the athlete's own. Readable via staff RLS.
+    async function coachContactHtml(athleteId: string, dob: string): Promise<string> {
+      const { data: a } = await supabase
+        .from('athletes')
+        .select('parent_id, profile_id')
+        .eq('id', athleteId)
+        .single();
+      const under16 = ageFromDob(dob) < 16;
+      const contactId = under16 ? (a?.parent_id ?? a?.profile_id) : (a?.profile_id ?? a?.parent_id);
+      if (!contactId) return '<p class="text-mist-500">No contact on file.</p>';
+      const { data: prof } = await supabase.from('profiles').select('full_name, phone, email').eq('id', contactId).single();
+      if (!prof) return '<p class="text-mist-500">No contact on file.</p>';
+      const who = under16 ? 'Parent/guardian' : 'Athlete';
+      return `<p class="text-mist-300"><b>${who}:</b> ${esc(prof.full_name)}</p>
+        ${prof.phone ? `<p class="text-mist-400">📞 <a class="text-ignite-400" href="tel:${esc(prof.phone)}">${esc(prof.phone)}</a></p>` : ''}
+        ${prof.email ? `<p class="text-mist-400">✉️ <a class="text-ignite-400" href="mailto:${esc(prof.email)}">${esc(prof.email)}</a></p>` : '<p class="text-mist-500">No phone/email on file.</p>'}`;
     }
 
     function lessonToggleHtml(): string {
