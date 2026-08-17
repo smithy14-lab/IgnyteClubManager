@@ -22,6 +22,7 @@ export interface Membership {
     slug: string;
     status: string;
     plan: string;
+    addons: string[] | null;
     logo_path: string | null;
     accent_color: string | null;
   };
@@ -33,9 +34,50 @@ export interface ActiveClub {
   slug: string;
   status: string;
   plan: string;
+  addons: string[];
   role: ClubRole | 'owner';
   accent_color: string | null;
   logo_path: string | null;
+}
+
+/** The columns every club query needs so capability gating works. */
+export const CLUB_COLS = 'id, name, slug, status, plan, addons, logo_path, accent_color';
+
+/**
+ * A club's package = exactly what the owner enabled. The whole app shows only
+ * these. Model: club/comped plans get everything; any à-la-carte club's surface
+ * IS its `addons` list (nothing baseline); a plan with no addons falls back to
+ * the free/small baseline. Some features are derived (payments rides with any
+ * billable module; progress/enrolments ride with lessons/classes).
+ */
+export type Feature =
+  | 'privates' | 'classes' | 'memberships' | 'shop' | 'events'
+  | 'website' | 'websitepro' | 'payments' | 'progress' | 'enrolments' | 'forms';
+
+const ALL_FEATURES: Feature[] = [
+  'privates', 'classes', 'memberships', 'shop', 'events',
+  'website', 'websitepro', 'payments', 'progress', 'enrolments', 'forms',
+];
+
+export function clubFeatures(club: { plan: string; addons?: string[] | null }): Set<string> {
+  if (club.plan === 'club' || club.plan === 'comped') return new Set<string>(ALL_FEATURES);
+  const addons = club.addons ?? [];
+  const s = new Set<string>(['forms']); // forms (waivers) are always available
+  // à-la-carte club → its surface is EXACTLY its addons (fully modular: a club
+  // can have just 'classes', or just 'enrolments', or just 'privates', etc.);
+  // a plan with no addons falls back to the free/small baseline.
+  const base = addons.length ? [...addons] : ['classes', 'enrolments', 'shop', 'events', 'website'];
+  if (club.plan === 'small' && !addons.includes('privates')) base.push('privates');
+  base.forEach((a) => s.add(a));
+  // derived-only conveniences (never force one primary module from another)
+  if (s.has('privates') || s.has('memberships') || s.has('classes') || s.has('enrolments')) s.add('payments');
+  if (s.has('privates') || s.has('classes') || s.has('enrolments')) s.add('progress');
+  if (s.has('websitepro')) s.add('website');
+  return s;
+}
+
+export function hasFeature(club: { plan: string; addons?: string[] | null }, key: Feature): boolean {
+  return clubFeatures(club).has(key);
 }
 
 export interface AuthCtx {
@@ -105,7 +147,7 @@ export async function requireAuth(clubRoles?: ClubRole[] | 'any'): Promise<AuthC
     supabase.from('profiles').select('*').eq('id', uid).single(),
     supabase
       .from('club_members')
-      .select('club_id, role, status, clubs(id, name, slug, status, plan, logo_path, accent_color)')
+      .select(`club_id, role, status, clubs(${CLUB_COLS})`)
       .eq('profile_id', uid),
   ]);
   if (!profile) {
@@ -133,6 +175,7 @@ export async function requireAuth(clubRoles?: ClubRole[] | 'any'): Promise<AuthC
       slug: chosen.clubs.slug,
       status: chosen.clubs.status,
       plan: chosen.clubs.plan,
+      addons: chosen.clubs.addons ?? [],
       role: chosen.role,
       accent_color: chosen.clubs.accent_color,
       logo_path: chosen.clubs.logo_path,
@@ -144,7 +187,7 @@ export async function requireAuth(clubRoles?: ClubRole[] | 'any'): Promise<AuthC
     if (supportId) {
       const { data: c } = await supabase.from('clubs').select('*').eq('id', supportId).single();
       if (c) {
-        club = { id: c.id, name: c.name, slug: c.slug, status: c.status, plan: c.plan, role: 'owner', accent_color: c.accent_color, logo_path: c.logo_path };
+        club = { id: c.id, name: c.name, slug: c.slug, status: c.status, plan: c.plan, addons: c.addons ?? [], role: 'owner', accent_color: c.accent_color, logo_path: c.logo_path };
       } else {
         localStorage.removeItem(CLUB_KEY);
       }

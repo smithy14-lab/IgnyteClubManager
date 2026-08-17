@@ -8,12 +8,12 @@ import AppLayout from '../../layouts/AppLayout.astro';
     <a href="/dashboard" class="btn btn-ghost btn-sm">← Today</a>
   </div>
 
-  <div class="flex flex-col gap-2.5 mb-6">
+  <div class="flex flex-col gap-2.5 mb-6" id="admin-groups">
     <div class="admin-group">
       <span class="admin-group-label">📅 Schedule</span>
-      <button data-tab="slots" class="tab-btn btn btn-ghost btn-sm">1-2-1 slots</button>
-      <a href="/admin/classes" class="btn btn-ghost btn-sm">Group classes</a>
-      <button data-tab="bookings" class="tab-btn btn btn-ghost btn-sm">Take register</button>
+      <button data-tab="slots" data-feature="privates" class="tab-btn btn btn-ghost btn-sm">1-2-1 slots</button>
+      <a href="/admin/classes" data-feature="classes" class="btn btn-ghost btn-sm">Group classes</a>
+      <button data-tab="bookings" data-feature="privates" class="tab-btn btn btn-ghost btn-sm">Take register</button>
     </div>
     <div class="admin-group">
       <span class="admin-group-label">👥 People</span>
@@ -22,13 +22,13 @@ import AppLayout from '../../layouts/AppLayout.astro';
     </div>
     <div class="admin-group">
       <span class="admin-group-label">💷 Money</span>
-      <a href="/admin/money" class="btn btn-ghost btn-sm">Invoices &amp; memberships</a>
+      <a href="/admin/money" data-feature="payments" class="btn btn-ghost btn-sm">Invoices &amp; memberships</a>
     </div>
     <div class="admin-group">
       <span class="admin-group-label">🌐 Your club</span>
-      <a href="/admin/website" class="btn btn-ghost btn-sm">Website</a>
-      <a href="/admin/shop" class="btn btn-ghost btn-sm">Shop</a>
-      <a href="/admin/events" class="btn btn-ghost btn-sm">Events</a>
+      <a href="/admin/website" data-feature="website" class="btn btn-ghost btn-sm">Website</a>
+      <a href="/admin/shop" data-feature="shop" class="btn btn-ghost btn-sm">Shop</a>
+      <a href="/admin/events" data-feature="events" class="btn btn-ghost btn-sm">Events</a>
       <button data-tab="branding" class="tab-btn btn btn-ghost btn-sm">Branding &amp; join</button>
     </div>
     <div class="admin-group">
@@ -38,8 +38,8 @@ import AppLayout from '../../layouts/AppLayout.astro';
     <div class="admin-group">
       <span class="admin-group-label">⚙️ Setup</span>
       <button data-tab="locations" class="tab-btn btn btn-ghost btn-sm">Locations</button>
-      <button data-tab="skills" class="tab-btn btn btn-ghost btn-sm">Skills</button>
-      <button data-tab="export" class="tab-btn btn btn-ghost btn-sm">Export</button>
+      <button data-tab="skills" data-feature="progress" class="tab-btn btn btn-ghost btn-sm">Skills</button>
+      <button data-tab="export" data-feature="privates" class="tab-btn btn btn-ghost btn-sm">Export</button>
       <button data-tab="settings" class="tab-btn btn btn-ghost btn-sm">Settings</button>
     </div>
   </div>
@@ -57,7 +57,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../../lib/supabase';
-    import { requireAuth, todayISO, fmtDate, fmtTime, esc, toast, errMsg } from '../../lib/app';
+    import { requireAuth, todayISO, fmtDate, fmtTime, esc, toast, errMsg, clubFeatures } from '../../lib/app';
     import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../../lib/calendar';
     import type { AuthCtx } from '../../lib/app';
 
@@ -69,8 +69,11 @@ import AppLayout from '../../layouts/AppLayout.astro';
     let locations: Loc[] = [];
 
     function highlightTab() {
+      // toggle classes (don't reassign className — that would wipe .hidden from capability gating)
       document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((x) => {
-        x.className = `tab-btn btn ${x.dataset.tab === tab ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+        const active = x.dataset.tab === tab;
+        x.classList.toggle('btn-primary', active);
+        x.classList.toggle('btn-ghost', !active);
       });
     }
     document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((b) =>
@@ -1090,8 +1093,24 @@ import AppLayout from '../../layouts/AppLayout.astro';
     (async () => {
       ctx = await requireAuth(['admin']);
       clubId = ctx.club!.id;
+
+      // Show only what the club's package includes. Owners see everything.
+      const feats = clubFeatures(ctx.club!);
+      const isOwner = ctx.club!.role === 'owner';
+      if (!isOwner) {
+        document.querySelectorAll<HTMLElement>('#admin-groups [data-feature]').forEach((el) => {
+          if (!feats.has(el.dataset.feature!)) el.classList.add('hidden');
+        });
+        // hide any group whose items are all hidden
+        document.querySelectorAll<HTMLElement>('.admin-group').forEach((g) => {
+          if (!g.querySelector('button:not(.hidden), a:not(.hidden)')) g.classList.add('hidden');
+        });
+      }
+      // default to the first still-visible tab
+      const firstTab = document.querySelector<HTMLElement>('.tab-btn:not(.hidden)');
+      tab = firstTab?.dataset.tab ?? 'people';
       const urlTab = new URLSearchParams(location.search).get('tab');
-      if (urlTab && document.querySelector(`.tab-btn[data-tab="${urlTab}"]`)) tab = urlTab;
+      if (urlTab && document.querySelector(`.tab-btn[data-tab="${urlTab}"]:not(.hidden)`)) tab = urlTab;
       highlightTab();
       await render();
     })().catch((e) => {
