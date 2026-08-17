@@ -28,16 +28,20 @@ import AppLayout from '../../layouts/AppLayout.astro';
         ${roster
           .map(
             (r) => `
-          <div class="py-2 border-t border-ink-700 first:border-0 flex flex-wrap items-center justify-between gap-2">
-            <p class="text-sm">${esc(r.name)} <span class="text-xs text-mist-500">(${ageFromDob(r.dob)})</span>
-              ${r.trial ? '<span class="pill pill-accent">⭐ trial</span>' : ''}
-              ${r.medical ? '<span class="pill pill-warn" title="Medical notes — see athlete profile">🚑</span>' : ''}</p>
-            <div class="flex gap-1.5 flex-wrap">
-              <button class="btn btn-sm ${r.attendance === 'present' ? 'btn-primary' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:present">Present</button>
-              <button class="btn btn-sm ${r.attendance === 'absent' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:absent">Absent</button>
-              <button class="btn btn-sm ${r.attendance === 'ill' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:ill" title="Off ill">🤒</button>
-              <button class="btn btn-sm ${r.attendance === 'injured' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:injured" title="Injured">🩹</button>
+          <div class="py-2 border-t border-ink-700 first:border-0" data-athrow="${r.athlete_id}">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-sm">${esc(r.name)} <span class="text-xs text-mist-500">(${ageFromDob(r.dob)})</span>
+                ${r.trial ? '<span class="pill pill-accent">⭐ trial</span>' : ''}
+                ${r.medical ? '<span class="pill pill-warn" title="Has medical notes">🚑</span>' : ''}</p>
+              <div class="flex gap-1.5 flex-wrap items-center">
+                <button class="btn btn-sm ${r.attendance === 'present' ? 'btn-primary' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:present">Present</button>
+                <button class="btn btn-sm ${r.attendance === 'absent' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:absent">Absent</button>
+                <button class="btn btn-sm ${r.attendance === 'ill' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:ill" title="Off ill">🤒</button>
+                <button class="btn btn-sm ${r.attendance === 'injured' ? 'btn-danger' : 'btn-ghost'}" data-mark="${sessionId}:${r.athlete_id}:injured" title="Injured">🩹</button>
+                <button class="btn btn-ghost btn-sm" data-info="${r.athlete_id}:${r.dob}" title="Contact & medical">ℹ️</button>
+              </div>
             </div>
+            <div class="info-panel hidden mt-2 rounded-lg bg-ink-900 border border-ink-700 p-3 text-xs"></div>
           </div>`
           )
           .join('') || '<p class="text-sm text-mist-500">Nobody on this session yet.</p>'}`;
@@ -49,6 +53,42 @@ import AppLayout from '../../layouts/AppLayout.astro';
           openRegister(sid, host);
         })
       );
+      host.querySelectorAll<HTMLButtonElement>('[data-info]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [aid, dob] = b.dataset.info!.split(':');
+          const panel = host.querySelector(`[data-athrow="${aid}"] .info-panel`) as HTMLElement;
+          if (!panel.classList.contains('hidden')) return panel.classList.add('hidden');
+          panel.classList.remove('hidden');
+          panel.innerHTML = await athleteInfoHtml(aid, dob);
+        })
+      );
+    }
+
+    // Contact + medical for the coach: parent's contact when the athlete is
+    // under 16, otherwise the athlete's own. Readable via staff RLS.
+    async function athleteInfoHtml(athleteId: string, dob: string): Promise<string> {
+      const { data: a } = await supabase
+        .from('athletes')
+        .select('medical_notes, parent_id, profile_id')
+        .eq('id', athleteId)
+        .single();
+      const under16 = ageFromDob(dob) < 16;
+      const contactId = under16 ? (a?.parent_id ?? a?.profile_id) : (a?.profile_id ?? a?.parent_id);
+      let contact = '';
+      if (contactId) {
+        const { data: prof } = await supabase.from('profiles').select('full_name, phone, email').eq('id', contactId).single();
+        if (prof) {
+          const who = under16 ? 'Parent/guardian' : 'Athlete';
+          contact = `<p class="text-mist-300"><b>${who}:</b> ${esc(prof.full_name)}</p>
+            ${prof.phone ? `<p class="text-mist-400">📞 <a class="text-ignite-400" href="tel:${esc(prof.phone)}">${esc(prof.phone)}</a></p>` : ''}
+            ${prof.email ? `<p class="text-mist-400">✉️ <a class="text-ignite-400" href="mailto:${esc(prof.email)}">${esc(prof.email)}</a></p>` : ''}`;
+        }
+      }
+      const medical = a?.medical_notes
+        ? `<p class="mt-2 text-charge-400"><b>🚑 Medical:</b> ${esc(a.medical_notes)}</p>`
+        : '<p class="mt-2 text-mist-500">No medical notes.</p>';
+      return (contact || '<p class="text-mist-500">No contact on file.</p>') + medical +
+        `<a class="btn btn-ghost btn-sm mt-2" href="/progress?athlete=${athleteId}">Update progress →</a>`;
     }
 
     async function render() {
