@@ -357,11 +357,17 @@ import AppLayout from '../../layouts/AppLayout.astro';
       const from = todayISO();
       const toD = new Date();
       toD.setDate(toD.getDate() + 28);
-      const [{ data: board }, { data: mine }] = await Promise.all([
+      const [{ data: board }, { data: mine }, { data: enr }] = await Promise.all([
         supabase.rpc('get_slot_board', { p_club: club.id, p_from: from, p_to: toD.toISOString().slice(0, 10) }),
         supabase.from('slot_coaches').select('slot_id').eq('coach_id', me.id),
+        supabase.from('athlete_enrolments').select('athletes(id, name)').eq('club_id', club.id),
       ]);
       const mySlotIds = new Set((mine ?? []).map((r) => r.slot_id));
+      const clubAthletes = (enr ?? [])
+        .map((r) => r.athletes as unknown as { id: string; name: string })
+        .filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const athleteOptions = clubAthletes.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
       type Slot = {
         id: string; slot_date: string; start_time: string; end_time: string;
         capacity: number; series_id: string | null; booked: number;
@@ -389,7 +395,7 @@ import AppLayout from '../../layouts/AppLayout.astro';
             .map((s) => {
               const joined = mySlotIds.has(s.id);
               return `
-            <div class="surface-card p-4">
+            <div class="surface-card p-4" data-slotcard="${s.id}">
               <div class="flex items-center justify-between gap-2">
                 <p class="font-display font-semibold">${fmtTime(s.start_time)}–${fmtTime(s.end_time)}</p>
                 ${joined ? '<span class="pill pill-success">You’re in</span>' : ''}
@@ -403,10 +409,15 @@ import AppLayout from '../../layouts/AppLayout.astro';
                 ${
                   joined
                     ? `<button class="btn btn-danger btn-sm" data-leave="${s.id}">Leave</button>` +
-                      (s.series_id ? `<button class="btn btn-danger btn-sm" data-leave-series="${s.id}">Leave series</button>` : '')
+                      (s.series_id ? `<button class="btn btn-danger btn-sm" data-leave-series="${s.id}">Leave series</button>` : '') +
+                      (s.booked < s.capacity && athleteOptions ? `<button class="btn btn-ghost btn-sm" data-assign="${s.id}">＋ Assign athlete</button>` : '')
                     : `<button class="btn btn-primary btn-sm" data-join="${s.id}">Join</button>` +
                       (s.series_id ? `<button class="btn btn-ghost btn-sm" data-join-series="${s.id}">Join every week</button>` : '')
                 }
+              </div>
+              <div class="assign-panel hidden mt-2 flex flex-wrap gap-2 items-center">
+                <select class="field !w-auto !py-1 !text-xs" data-assign-athlete>${athleteOptions}</select>
+                <button class="btn btn-primary btn-sm" data-assign-go="${s.id}">Book them in</button>
               </div>
             </div>`;
             })
@@ -432,6 +443,24 @@ import AppLayout from '../../layouts/AppLayout.astro';
       );
       content.querySelectorAll<HTMLButtonElement>('[data-leave-series]').forEach((b) =>
         b.addEventListener('click', () => act('coach_leave_slot', b.dataset.leaveSeries!, true))
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-assign]').forEach((b) =>
+        b.addEventListener('click', () =>
+          content.querySelector(`[data-slotcard="${b.dataset.assign}"] .assign-panel`)?.classList.toggle('hidden')
+        )
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-assign-go]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const card = content.querySelector(`[data-slotcard="${b.dataset.assignGo}"]`)!;
+          const athleteId = (card.querySelector('[data-assign-athlete]') as HTMLSelectElement).value;
+          if (!athleteId) return toast('Pick an athlete.', 'err');
+          b.disabled = true;
+          const { error } = await supabase.rpc('coach_book_athlete', { p_slot: b.dataset.assignGo, p_athlete: athleteId });
+          b.disabled = false;
+          if (error) return toast(errMsg(error), 'err');
+          toast('Booked them in. 🤸');
+          render();
+        })
       );
     }
 
