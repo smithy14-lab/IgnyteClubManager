@@ -2,13 +2,18 @@
 import AppLayout from '../layouts/AppLayout.astro';
 ---
 
-<AppLayout title="My athletes">
-  <p class="eyebrow">Family</p>
-  <h1 class="text-2xl mt-1 mb-5">My athletes</h1>
+<AppLayout title="Profile">
+  <p class="eyebrow">Your account</p>
+  <h1 class="text-2xl mt-1 mb-5">Profile &amp; athletes</h1>
 
+  <!-- You -->
+  <div id="me" class="surface-card p-5 max-w-md mb-6"></div>
+
+  <!-- Athletes at this club -->
   <div id="list" class="grid gap-4 sm:grid-cols-2 mb-6"></div>
 
-  <div class="surface-card p-5 max-w-md">
+  <!-- Add an athlete -->
+  <div id="add-wrap" class="surface-card p-5 max-w-md">
     <h2 class="text-base font-semibold mb-4">Add an athlete</h2>
     <form id="add-form" class="flex flex-col gap-4">
       <div>
@@ -37,14 +42,92 @@ import AppLayout from '../layouts/AppLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, ageFromDob, esc, toast, errMsg, type AuthCtx } from '../lib/app';
+    import { requireAuth, myAthletes, ageFromDob, esc, toast, errMsg, type AuthCtx, type Athlete } from '../lib/app';
 
+    const me = document.getElementById('me')!;
     const list = document.getElementById('list')!;
     let ctx: AuthCtx;
+
+    // ---- You: parent details + "I train here too" ----
+    function renderMe(athletes: (Athlete & { enrolled: boolean })[]) {
+      const p = ctx.profile;
+      const self = athletes.find((a) => a.profile_id === p.id);
+      const selfHere = self?.enrolled ?? false;
+      me.innerHTML = `
+        <h2 class="text-base font-semibold mb-4">You</h2>
+        <div class="flex flex-col gap-3">
+          <div><label class="form-label">Name</label><input class="field" id="me-name" value="${esc(p.full_name)}" /></div>
+          <div><label class="form-label">Phone</label><input class="field" id="me-phone" value="${esc(p.phone ?? '')}" placeholder="Mobile (coaches can reach you)" /></div>
+          <div><label class="form-label">Email</label><input class="field" value="${esc(p.email)}" disabled /></div>
+          <button class="btn btn-primary btn-sm" id="me-save">Save my details</button>
+        </div>
+        <label class="mt-4 pt-4 border-t border-ink-700 text-sm text-mist-200 flex gap-2 items-start cursor-pointer">
+          <input type="checkbox" id="me-athlete" class="mt-1" ${selfHere ? 'checked' : ''} />
+          <span>I train here too — add me as an athlete so I can be booked into lessons${selfHere ? '.' : ' &amp; classes.'}</span>
+        </label>
+        <div id="me-athlete-dob" class="mt-2 ${self ? 'hidden' : 'hidden'}">
+          <label class="form-label">Your date of birth</label>
+          <input class="field" id="me-dob" type="date" />
+        </div>`;
+
+      document.getElementById('me-save')?.addEventListener('click', async () => {
+        const { error } = await supabase.from('profiles').update({
+          full_name: (document.getElementById('me-name') as HTMLInputElement).value.trim(),
+          phone: (document.getElementById('me-phone') as HTMLInputElement).value.trim() || null,
+        }).eq('id', p.id);
+        if (error) return toast(errMsg(error), 'err');
+        toast('Details saved.');
+      });
+
+      const cb = document.getElementById('me-athlete') as HTMLInputElement;
+      const dobWrap = document.getElementById('me-athlete-dob')!;
+      cb.addEventListener('change', async () => {
+        if (cb.checked) {
+          if (self) {
+            // self-athlete exists (maybe at another club) → just enrol here, reuse their dob
+            const { error } = await supabase.rpc('save_athlete', {
+              p_club: ctx.club!.id, p_id: null, p_name: self.name, p_dob: self.dob, p_self: true,
+            });
+            if (error) { cb.checked = false; return toast(errMsg(error), 'err'); }
+            toast('Added you as an athlete here. 🤸');
+            return render();
+          }
+          // first time → need a DOB, confirm with a button
+          cb.checked = false;
+          dobWrap.classList.remove('hidden');
+          (document.getElementById('me-dob') as HTMLInputElement).focus();
+          if (!document.getElementById('me-athlete-go')) {
+            const go = document.createElement('button');
+            go.id = 'me-athlete-go';
+            go.className = 'btn btn-primary btn-sm mt-2';
+            go.textContent = 'Add me as an athlete';
+            dobWrap.appendChild(go);
+            go.addEventListener('click', async () => {
+              const dob = (document.getElementById('me-dob') as HTMLInputElement).value;
+              if (!dob) return toast('Add your date of birth first.', 'err');
+              const { error } = await supabase.rpc('save_athlete', {
+                p_club: ctx.club!.id, p_id: null, p_name: p.full_name, p_dob: dob, p_self: true,
+              });
+              if (error) return toast(errMsg(error), 'err');
+              toast("You're set up as an athlete — you can be booked in now. 🤸");
+              render();
+            });
+          }
+        } else {
+          if (!self) return;
+          if (!confirm('Remove yourself as an athlete at this club? Your bookings here will be cancelled.')) { cb.checked = true; return; }
+          const { error } = await supabase.rpc('unenrol_athlete', { p_athlete: self.id, p_club: ctx.club!.id });
+          if (error) { cb.checked = true; return toast(errMsg(error), 'err'); }
+          toast('Removed you as an athlete here.');
+          render();
+        }
+      });
+    }
 
     async function render() {
       const club = ctx.club!;
       const athletes = await myAthletes(club.id);
+      renderMe(athletes);
       const here = athletes.filter((a) => a.enrolled);
       const elsewhere = athletes.filter((a) => !a.enrolled);
       list.innerHTML = here.length
@@ -53,7 +136,7 @@ import AppLayout from '../layouts/AppLayout.astro';
               (a) => `
         <div class="surface-card p-5" data-card="${a.id}">
           <div class="flex items-center justify-between gap-2">
-            <h3 class="font-semibold">${esc(a.name)}</h3>
+            <h3 class="font-semibold">${esc(a.name)}${a.profile_id === ctx.profile.id ? ' <span class="pill pill-accent">you</span>' : ''}</h3>
             <div class="flex gap-1.5 items-center">
               ${(a as unknown as { medical_notes?: string }).medical_notes ? '<span class="pill pill-warn" title="Has medical notes">🚑</span>' : ''}
               ${(a as unknown as { media_consent?: boolean }).media_consent ? '<span class="pill" title="Media consent given">🎬</span>' : ''}
@@ -64,7 +147,7 @@ import AppLayout from '../layouts/AppLayout.astro';
           <div class="mt-3 flex flex-wrap gap-2">
             <a class="btn btn-ghost btn-sm" href="/progress?athlete=${a.id}">Journey</a>
             <button class="btn btn-ghost btn-sm" data-edit="${a.id}">Edit</button>
-            <button class="btn btn-danger btn-sm" data-remove="${a.id}">Remove</button>
+            ${a.profile_id === ctx.profile.id ? '' : `<button class="btn btn-danger btn-sm" data-remove="${a.id}">Remove</button>`}
           </div>
           <div class="edit-panel hidden mt-3 pt-3 border-t border-ink-700 flex flex-col gap-3">
             <div><label class="form-label">Name</label><input class="field" data-f="name" value="${esc(a.name)}" /></div>
@@ -80,7 +163,7 @@ import AppLayout from '../layouts/AppLayout.astro';
         </div>`
             )
             .join('')
-        : `<p class="text-sm text-mist-500 sm:col-span-2">No athletes at ${esc(club.name)} yet — add one below, or enrol an existing athlete.</p>`;
+        : `<p class="text-sm text-mist-500 sm:col-span-2">No athletes at ${esc(club.name)} yet — add one below, or tick "I train here too" above.</p>`;
 
       if (elsewhere.length) {
         list.innerHTML += `<div class="surface-card p-5 sm:col-span-2">
@@ -89,7 +172,7 @@ import AppLayout from '../layouts/AppLayout.astro';
             .map(
               (a) => `
             <div class="py-2 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
-              <p class="text-sm">${esc(a.name)}</p>
+              <p class="text-sm">${esc(a.name)}${a.profile_id === ctx.profile.id ? ' (you)' : ''}</p>
               <button class="btn btn-primary btn-sm" data-enrol="${a.id}">Enrol at ${esc(club.name)}</button>
             </div>`
             )
@@ -115,18 +198,14 @@ import AppLayout from '../layouts/AppLayout.astro';
         b.addEventListener('click', async () => {
           const card = list.querySelector(`[data-card="${b.dataset.save}"]`)!;
           const val = (f: string) => (card.querySelector(`[data-f="${f}"]`) as HTMLInputElement).value;
-          const { error } = await supabase
-            .from('athletes')
-            .update({
-              name: val('name'),
-              dob: val('dob'),
-              notes: val('notes') || null,
-              medical_notes: val('medical') || null,
-              media_consent: (card.querySelector('[data-f="consent"]') as HTMLInputElement).checked,
-            })
-            .eq('id', b.dataset.save);
+          const { error } = await supabase.rpc('save_athlete', {
+            p_club: null, p_id: b.dataset.save,
+            p_name: val('name'), p_dob: val('dob'),
+            p_notes: val('notes') || null, p_medical: val('medical') || null,
+            p_consent: (card.querySelector('[data-f="consent"]') as HTMLInputElement).checked,
+          });
           if (error) return toast(errMsg(error), 'err');
-          toast('Athlete updated.');
+          toast('Saved.');
           render();
         })
       );
@@ -157,24 +236,23 @@ import AppLayout from '../layouts/AppLayout.astro';
 
     (async () => {
       ctx = await requireAuth(['parent', 'athlete', 'admin']);
-      // 18+ athletes manage their own record; the add-a-child form is for parents
+      // athlete-role members manage only their own record — hide the add-a-child form
       if (ctx.club && ctx.memberships.find((m) => m.club_id === ctx.club!.id)?.role === 'athlete') {
-        (document.querySelector('.surface-card.p-5.max-w-md') as HTMLElement | null)?.classList.add('hidden');
+        document.getElementById('add-wrap')?.classList.add('hidden');
       }
       const form = document.getElementById('add-form') as HTMLFormElement;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const { data: created, error } = await supabase.from('athletes').insert({
-          parent_id: ctx.profile.id,
-          name: (document.getElementById('name') as HTMLInputElement).value,
-          dob: (document.getElementById('dob') as HTMLInputElement).value,
-          notes: (document.getElementById('notes') as HTMLTextAreaElement).value || null,
-          medical_notes: (document.getElementById('medical') as HTMLTextAreaElement).value || null,
-          media_consent: (document.getElementById('consent') as HTMLInputElement).checked,
-        }).select('id').single();
+        const { error } = await supabase.rpc('save_athlete', {
+          p_club: ctx.club!.id, p_id: null,
+          p_name: (document.getElementById('name') as HTMLInputElement).value,
+          p_dob: (document.getElementById('dob') as HTMLInputElement).value,
+          p_notes: (document.getElementById('notes') as HTMLTextAreaElement).value || null,
+          p_medical: (document.getElementById('medical') as HTMLTextAreaElement).value || null,
+          p_consent: (document.getElementById('consent') as HTMLInputElement).checked,
+          p_self: false,
+        });
         if (error) return toast(errMsg(error), 'err');
-        const { error: e2 } = await supabase.rpc('enrol_athlete', { p_athlete: created.id, p_club: ctx.club!.id });
-        if (e2) return toast(errMsg(e2), 'err');
         toast('Athlete added & enrolled!');
         form.reset();
         render();
