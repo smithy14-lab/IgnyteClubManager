@@ -214,6 +214,10 @@ const appNav: [string, string, string, string][] = [
         font-weight: 500;
         color: var(--color-mist-200);
       }
+      /* This scoped rule outranks Tailwind's utility layer, so make .hidden win here. */
+      .drawer-link.hidden {
+        display: none;
+      }
       .drawer-link:hover {
         background: var(--color-ink-800);
         color: var(--color-ignite-400);
