@@ -1,0 +1,108 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Ignyte HQ">
+  <p class="eyebrow">Ignyte owner</p>
+  <h1 class="text-2xl mt-1 mb-5">Ignyte HQ</h1>
+  <div id="totals" class="grid grid-cols-3 gap-2 mb-6"></div>
+
+  <div class="grid md:grid-cols-[1fr_1.4fr] gap-5 items-start">
+    <form id="new-club" class="surface-card p-5 flex flex-col gap-3">
+      <h2 class="font-semibold">Bring a club on</h2>
+      <div>
+        <label class="form-label" for="c-name">Club name</label>
+        <input class="field" id="c-name" required maxlength="60" placeholder="Storm 1-2-1 Academy" />
+      </div>
+      <div>
+        <label class="form-label" for="c-slug">Short id</label>
+        <input class="field" id="c-slug" required pattern="[a-z0-9][a-z0-9-]{1,28}[a-z0-9]" placeholder="storm-121" />
+      </div>
+      <div>
+        <label class="form-label" for="c-owner">Club owner's email</label>
+        <input class="field" id="c-owner" type="email" required placeholder="owner@club.co.uk" />
+        <p class="text-xs text-mist-500 mt-1">If they already have an Ignyte login they're in immediately; otherwise they become owner the moment they sign up with this email.</p>
+      </div>
+      <div>
+        <label class="form-label" for="c-venue">Venue</label>
+        <input class="field" id="c-venue" placeholder="Main gym" />
+      </div>
+      <button class="btn btn-primary" type="submit">Create club</button>
+    </form>
+    <div id="clubs" class="flex flex-col gap-3"><p class="text-sm text-mist-500">Loading…</p></div>
+  </div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requirePlatformOwner, esc, toast, errMsg } from '../lib/app';
+
+    type ClubRow = { id: string; name: string; slug: string; status: string; venue: string | null; join_code: string; owners: string; pending_owner: string | null; members: number; coaches: number; athletes: number; lessons_30d: number; upcoming: number; open_slots: number };
+
+    async function render() {
+      const { data, error } = await supabase.rpc('hq_overview');
+      if (error) return toast(errMsg(error), 'err');
+      const o = data as { clubs: ClubRow[]; totals: { clubs: number; people: number; lessons_30d: number } };
+      document.getElementById('totals')!.innerHTML = [
+        [o.totals.clubs, 'active clubs'], [o.totals.people, 'people'], [o.totals.lessons_30d, 'lessons · 30d'],
+      ].map(([n, l]) => `<div class="surface-card p-3 text-center"><p class="text-2xl font-display font-semibold text-ignite-400">${n}</p><p class="text-[0.65rem] uppercase tracking-widest text-mist-500">${l}</p></div>`).join('');
+      const host = document.getElementById('clubs')!;
+      host.innerHTML = o.clubs.map((c) => `
+        <div class="surface-card p-4 ${c.status !== 'active' ? 'opacity-60' : ''}">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="font-semibold">${esc(c.name)} <span class="text-xs text-mist-500 font-normal">/${esc(c.slug)}</span> ${c.status !== 'active' ? '<span class="pill pill-danger">suspended</span>' : ''}</h3>
+              <p class="text-xs text-mist-400 mt-0.5">${c.owners ? 'Owner: ' + esc(c.owners) : c.pending_owner ? 'Owner invited: ' + esc(c.pending_owner) + ' (not signed up yet)' : 'No owner yet'}</p>
+              <p class="text-xs text-mist-500 mt-0.5">Family code <code class="text-ignite-400">${esc(c.join_code)}</code>${c.venue ? ' · ' + esc(c.venue) : ''}</p>
+            </div>
+            <div class="flex gap-1.5">
+              <a class="btn btn-primary btn-sm" href="/club?club=${c.id}">Open as club</a>
+              <button class="btn btn-ghost btn-sm" data-status="${c.id}:${c.status === 'active' ? 'suspended' : 'active'}">${c.status === 'active' ? 'Suspend' : 'Reactivate'}</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mt-3 text-center text-xs">
+            ${[[c.members, 'people'], [c.coaches, 'coaches'], [c.athletes, 'athletes'], [c.lessons_30d, 'lessons 30d'], [c.upcoming, 'upcoming'], [c.open_slots, 'open slots']]
+              .map(([n, l]) => `<div class="rounded-lg bg-ink-900 border border-ink-700 py-1.5"><b class="block text-sm">${n}</b><span class="text-mist-500">${l}</span></div>`).join('')}
+          </div>
+        </div>`).join('') || '<p class="text-sm text-mist-500">No clubs yet — create the first one.</p>';
+      host.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [id, status] = b.dataset.status!.split(':');
+          if (status === 'suspended' && !confirm('Suspend this club? Nobody in it can sign in to it until you reactivate.')) return;
+          const { error: e } = await supabase.rpc('hq_set_club_status', { p_club: id, p_status: status });
+          if (e) return toast(errMsg(e), 'err');
+          render();
+        })
+      );
+    }
+
+    const nameEl = document.getElementById('c-name') as HTMLInputElement;
+    const slugEl = document.getElementById('c-slug') as HTMLInputElement;
+    nameEl.addEventListener('input', () => {
+      if (!slugEl.dataset.touched) slugEl.value = nameEl.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+    });
+    slugEl.addEventListener('input', () => (slugEl.dataset.touched = '1'));
+
+    (document.getElementById('new-club') as HTMLFormElement).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const { data, error } = await supabase.rpc('hq_create_club', {
+        p_name: nameEl.value.trim(), p_slug: slugEl.value.trim(),
+        p_owner_email: (document.getElementById('c-owner') as HTMLInputElement).value.trim(),
+        p_venue: (document.getElementById('c-venue') as HTMLInputElement).value.trim(),
+      });
+      if (error) return toast(errMsg(error), 'err');
+      const r = data as { owner_status: string; join_code: string };
+      toast(r.owner_status === 'added' ? 'Club created — the owner can sign in now.' : 'Club created — the owner becomes owner when they sign up.');
+      (e.target as HTMLFormElement).reset();
+      delete slugEl.dataset.touched;
+      render();
+    });
+
+    (async () => {
+      await requirePlatformOwner();
+      localStorage.removeItem('ignyte-club');
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

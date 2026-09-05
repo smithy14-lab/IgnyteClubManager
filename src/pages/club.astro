@@ -1,437 +1,366 @@
 ---
-// Public club site. Served at /c/{slug} and /c/{slug}/{page} via the worker
-// rewrite (or ?s=slug). Clubs with the website feature get a multi-page site
-// (custom pages + classes + coaches + contact); everyone else gets the
-// single-page portal.
 import AppLayout from '../layouts/AppLayout.astro';
 ---
 
-<AppLayout title="Club" chrome={false}>
-  <div class="min-h-dvh flex flex-col">
-    <div id="portal" class="max-w-2xl w-full mx-auto py-8 px-4 flex-1">
-      <p class="text-mist-500 text-sm text-center">Loading club…</p>
-    </div>
-    <footer class="py-5 text-center border-t border-ink-800">
-      <a href="/" id="powered-by" class="text-xs text-mist-500 hover:text-ignite-400">
-        ⚡ Powered by <span class="font-semibold">Ignyte Club Manager</span>
-      </a>
-      <a href="/dashboard" id="openapp-footer" class="hidden text-xs text-ignite-400 ml-3">Open the app →</a>
-    </footer>
+<AppLayout title="Club">
+  <p class="eyebrow" id="eyebrow">Club</p>
+  <div class="flex flex-wrap items-center justify-between gap-2 mt-1 mb-4">
+    <h1 class="text-2xl" id="title">Today</h1>
+    <nav class="flex gap-1.5 flex-wrap" id="tabs">
+      <button class="btn btn-ghost btn-sm" data-tab="today">☀️ Today</button>
+      <button class="btn btn-ghost btn-sm" data-tab="schedule">📅 Schedule</button>
+      <button class="btn btn-ghost btn-sm" data-tab="people">👥 People</button>
+      <button class="btn btn-ghost btn-sm" data-tab="money">💷 Money</button>
+      <button class="btn btn-ghost btn-sm" data-tab="settings">⚙️ Settings</button>
+    </nav>
   </div>
+  <div id="content"><p class="text-sm text-mist-500">Loading…</p></div>
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { esc, toast, errMsg, setActiveClub } from '../lib/app';
+    import { requireAuth, schedule, startOfDay, addDays, esc, toast, errMsg, money, fmtWhen, fmtDate, ageFromDob, journeyHtml, wireJourneyEditing, type Ctx, type JourneyData } from '../lib/app';
+    import { scheduleHtml, wireScheduleActions, addSlotsFormHtml, wireAddSlots } from '../lib/ui';
 
-    const portal = document.getElementById('portal')!;
-    const m = location.pathname.match(/^\/c\/([a-z0-9-]+)(?:\/([a-z0-9-]+))?/);
-    let slug = m?.[1] ?? new URLSearchParams(location.search).get('s') ?? '';
-    let pageSlug = m?.[2] ?? new URLSearchParams(location.search).get('p') ?? '';
-    // Custom club domain: the host IS the club; the path is the page.
-    const onCustomDomain = !slug && !/workers\.dev$|^localhost$|^127\./.test(location.hostname);
-    if (onCustomDomain) pageSlug = location.pathname.replaceAll('/', '');
-    if (pageSlug === 'signup') pageSlug = 'join';
-    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const content = document.getElementById('content')!;
+    let ctx: Ctx;
+    let tab = new URLSearchParams(location.search).get('tab') || 'today';
+    let weekOffset = 0;
 
-    type Site = {
-      name: string; slug: string; blurb: string | null; accent_color: string | null;
-      website: boolean; open_join?: boolean;
-      pages: { slug: string; title: string; body: string; blocks: Block[] | null }[];
-      coaches: { name: string; disciplines: string[] | null; levels: string | null }[];
-      upcoming_slots: number; locations: string[];
-      shop?: { name: string; description: string | null; price: number; options: string[]; image_url: string | null; in_stock: boolean }[];
-      events?: { name: string; description: string | null; event_date: string; start_time: string | null; fee: number | null }[];
-      classes?: { name: string; discipline: string; day_of_week: number; start_time: string; end_time: string;
-        age_min: number | null; age_max: number | null; monthly_fee: number | null;
-        price_per_session: number | null; trial_allowed: boolean }[];
+    type Member = { id: string; name: string; email: string; phone: string | null; roles: string[]; joined: string };
+    type Invite = { id: string; email: string; roles: string[] };
+    type Person = { id: string; name: string; dob: string | null; active: boolean; medical: string | null; notes: string | null; goals: string | null; parent_id: string | null; profile_id: string | null; parent_name: string | null; parent_phone: string | null; parent_email: string | null; own_name: string | null; own_phone: string | null; own_email: string | null; lessons: number; next: string | null };
+    type People = { members: Member[]; invites: Invite[]; athletes: Person[] };
+    let people: People | null = null;
+    async function loadPeople(): Promise<People> {
+      const { data, error } = await supabase.rpc('club_people', { p_club: ctx.club!.id });
+      if (error) throw error;
+      people = data as People;
+      return people;
+    }
+    const coaches = async () => (await loadPeople()).members.filter((m) => m.roles.includes('coach')).map((m) => ({ id: m.id, name: m.name }));
+    const athletesForAssign = async () => (await loadPeople()).athletes.filter((a) => a.active).map((a) => ({ id: a.id, name: a.name }));
+    const skillsFor = async (athleteId: string) => {
+      const { data } = await supabase.rpc('athlete_journey', { p_athlete: athleteId });
+      return ((data as JourneyData | null)?.progress ?? []).map((p) => p.skill);
     };
+    const ROLES = ['owner', 'admin', 'coach', 'parent'];
 
-    type Block = {
-      type: string; heading?: string; sub?: string; md?: string; url?: string;
-      caption?: string; side?: string; images?: string[]; label?: string; page?: string;
-      cta_label?: string; cta_page?: string;
-    };
-
-    /** Wix-style sections: static blocks render content, live blocks render club data. */
-    function renderBlocks(c: Site, blocks: Block[], signedIn: boolean): string {
-      const img = (u?: string, cls = '') =>
-        u && /^https:\/\//.test(u) ? `<img src="${esc(u)}" alt="" class="rounded-xl max-w-full ${cls}" loading="lazy" />` : '';
-      return blocks
-        .map((b) => {
-          switch (b.type) {
-            case 'hero':
-              return `<div class="text-center py-8">
-                ${b.heading ? `<h1 class="text-3xl font-display">${esc(b.heading)}</h1>` : ''}
-                ${b.sub ? `<p class="text-mist-400 mt-3 max-w-xl mx-auto">${esc(b.sub)}</p>` : ''}
-                ${b.url ? `<div class="mt-5 flex justify-center">${img(b.url, 'max-h-80 object-cover w-full')}</div>` : ''}
-                ${b.cta_label ? `<a href="${link(b.cta_page ?? 'join')}" class="btn btn-primary mt-6">${esc(b.cta_label)}</a>` : ''}
-              </div>`;
-            case 'text':
-              return `<div class="surface-card p-6 mt-4 text-left">${md(b.md ?? '')}</div>`;
-            case 'image':
-              return `<figure class="mt-4 text-center">${img(b.url, 'w-full object-cover')}
-                ${b.caption ? `<figcaption class="text-xs text-mist-500 mt-2">${esc(b.caption)}</figcaption>` : ''}</figure>`;
-            case 'image_text':
-              return `<div class="surface-card p-6 mt-4 grid gap-5 sm:grid-cols-2 items-center">
-                <div class="${b.side === 'right' ? 'sm:order-2' : ''}">${img(b.url, 'w-full object-cover')}</div>
-                <div class="text-left">${md(b.md ?? '')}</div>
-              </div>`;
-            case 'gallery':
-              return `<div class="mt-4 grid gap-2 grid-cols-2 sm:grid-cols-3">
-                ${(b.images ?? []).slice(0, 12).map((u) => img(u, 'w-full h-36 object-cover')).join('')}
-              </div>`;
-            case 'cta':
-              return `<div class="text-center mt-6"><a href="${link(b.page ?? 'join')}" class="btn btn-primary">${esc(b.label ?? 'Join us')}</a></div>`;
-            case 'timetable':
-              return classesHtml(c);
-            case 'coaches':
-              return coachesHtml(c);
-            case 'events':
-              return eventsHtml(c);
-            case 'shop':
-              return shopHtml(c);
-            case 'contact':
-              return contactHtml(c);
-            default:
-              return '';
-          }
-        })
-        .join('');
+    function setTab(t: string) {
+      tab = t;
+      document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.classList.toggle('btn-primary', b.dataset.tab === t));
+      history.replaceState(null, '', `?tab=${t}${ctx.club ? '&club=' + ctx.club.id : ''}`);
+      render().catch((e) => toast(errMsg(e), 'err'));
     }
-
-    /** Tiny markdown: headings, bold/italic, https links, lists, paragraphs. Escapes first. */
-    function md(src: string): string {
-      const inline = (s: string) =>
-        s
-          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-          .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-          .replace(/!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)/g, '<img src="$2" alt="$1" class="rounded-lg my-2 max-w-full" loading="lazy" />')
-          .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a class="text-ignite-400 underline" href="$2" target="_blank" rel="noopener">$1</a>');
-      const blocks = esc(src).replace(/\r/g, '').split(/\n{2,}/);
-      return blocks
-        .map((b) => {
-          const t = b.trim();
-          if (!t) return '';
-          if (/^### /.test(t)) return `<h3 class="text-base font-semibold mt-4">${inline(t.slice(4))}</h3>`;
-          if (/^## /.test(t)) return `<h2 class="text-lg font-semibold mt-5">${inline(t.slice(3))}</h2>`;
-          if (/^# /.test(t)) return `<h1 class="text-xl font-semibold mt-5">${inline(t.slice(2))}</h1>`;
-          if (t.split('\n').every((l) => /^[-*] /.test(l.trim()))) {
-            return `<ul class="list-disc pl-5 mt-3 flex flex-col gap-1 text-sm text-mist-300">${t
-              .split('\n')
-              .map((l) => `<li>${inline(l.trim().slice(2))}</li>`)
-              .join('')}</ul>`;
-          }
-          return `<p class="mt-3 text-sm text-mist-300 leading-relaxed">${inline(t).replace(/\n/g, '<br />')}</p>`;
-        })
-        .join('');
-    }
-
-    // page targets are club-authored: hard-sanitise so nothing can escape the href
-    const link = (p: string) => {
-      const safe = (p ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '');
-      return onCustomDomain ? `/${safe}` : `/c/${slug}${safe ? '/' + safe : ''}`;
-    };
-
-    function classesHtml(c: Site) {
-      return (c.classes ?? []).length
-        ? `<div class="surface-card p-5 mt-4">
-            <p class="text-sm font-semibold mb-2">🤸 Weekly classes</p>
-            ${(c.classes ?? [])
-              .map(
-                (g) => `<div class="py-1.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
-                  <p class="text-sm">${esc(g.name)}
-                    <span class="text-xs text-mist-500">· ${DAYS[g.day_of_week]}s ${g.start_time.slice(0, 5)}–${g.end_time.slice(0, 5)}${g.age_min != null || g.age_max != null ? ` · ages ${g.age_min ?? 0}–${g.age_max ?? '99+'}` : ''}</span></p>
-                  ${g.trial_allowed ? '<span class="pill pill-accent">trials open</span>' : ''}
-                </div>`
-              )
-              .join('')}
-            <p class="text-xs text-mist-500 mt-2">Join the club to enrol or book a taster.</p>
-          </div>`
-        : '<p class="text-sm text-mist-500 mt-4">No group classes yet — 1-2-1 privates are bookable in the app.</p>';
-    }
-
-    function coachesHtml(c: Site) {
-      return c.coaches.length
-        ? `<div class="surface-card p-5 mt-4">
-            <p class="text-sm font-semibold mb-2">Our coaches</p>
-            ${c.coaches
-              .map(
-                (co) => `<p class="text-sm py-1.5 border-t border-ink-700 first:border-0">${esc(co.name)}
-                  <span class="text-xs text-mist-500">${co.disciplines?.length ? '· ' + co.disciplines.join(' + ') : ''}${co.levels ? ' · ' + esc(co.levels) : ''}</span></p>`
-              )
-              .join('')}
-          </div>`
-        : '';
-    }
-
-    function joinHtml(c: Site, signedIn: boolean) {
-      return `<div class="surface-card p-5 mt-4">
-        <p class="text-sm font-semibold mb-2">Join ${esc(c.name)}</p>
-        <p class="text-xs text-mist-500 mb-3">${c.open_join !== false ? 'Sign up and you\'re in — book, enrol and shop straight away.' : 'Sign up and the club will approve you — usually the same day.'}</p>
-        ${
-          signedIn
-            ? `<button class="btn btn-primary" id="p-join">Join this club</button>
-               <div class="mt-3 flex gap-2"><input class="field flex-1 uppercase" id="p-code" maxlength="6" placeholder="Club code (optional)" /></div>`
-            : `<div class="flex flex-wrap gap-2">
-                <a href="${link('join')}" class="btn btn-primary">Join online — free account</a>
-                <a href="${link('login')}" class="btn btn-ghost">Member sign in</a>
-              </div>`
-        }
-      </div>`;
-    }
-
-    function authHtml(c: Site, mode: 'login' | 'join') {
-      return `<div class="surface-card p-6 mt-4 max-w-md mx-auto">
-        <h2 class="text-lg font-semibold mb-1">${mode === 'login' ? `Sign in to ${esc(c.name)}` : `Join ${esc(c.name)}`}</h2>
-        <p class="text-xs text-mist-500 mb-4">${
-          mode === 'login'
-            ? 'Your one Ignyte login works for every club you belong to.'
-            : c.open_join !== false
-              ? 'Free family account — you\'re in the club the moment you sign up.'
-              : 'Free family account — the club approves new members, usually the same day.'
-        }</p>
-        <form id="auth-form" class="flex flex-col gap-3">
-          ${mode === 'join' ? `
-          <div><label class="form-label">Your name</label><input class="field" id="a-name" required autocomplete="name" /></div>
-          <div><label class="form-label">Phone (optional)</label><input class="field" id="a-phone" type="tel" autocomplete="tel" /></div>` : ''}
-          <div><label class="form-label">Email</label><input class="field" id="a-email" type="email" required autocomplete="email" /></div>
-          <div><label class="form-label">Password</label><input class="field" id="a-pw" type="password" minlength="8" required autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" /></div>
-          <button class="btn btn-primary w-full" type="submit">${mode === 'login' ? 'Sign in' : c.open_join !== false ? 'Create account & join' : 'Create account & request to join'}</button>
-        </form>
-        <p class="text-xs text-mist-500 mt-4">
-          ${mode === 'login'
-            ? `New here? <a class="text-ignite-400" href="${link('join')}">Join ${esc(c.name)}</a>`
-            : `Already have an account? <a class="text-ignite-400" href="${link('login')}">Sign in</a>`}
-        </p>
-      </div>`;
-    }
-
-    async function activateAndGo(c: Site) {
-      const { data: clubRow } = await supabase.from('clubs').select('id').eq('slug', c.slug).maybeSingle();
-      if (clubRow) await setActiveClub(clubRow.id);
-      location.href = '/dashboard';
-    }
-
-    function wireAuth(c: Site, mode: 'login' | 'join') {
-      document.getElementById('auth-form')?.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const email = (document.getElementById('a-email') as HTMLInputElement).value.trim();
-        const pw = (document.getElementById('a-pw') as HTMLInputElement).value;
-        try {
-          if (mode === 'login') {
-            const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
-            if (error) throw error;
-            toast(`Welcome back! 🔥`);
-            await activateAndGo(c);
-            return;
-          }
-          const { data, error } = await supabase.auth.signUp({
-            email,
-            password: pw,
-            options: {
-              data: {
-                full_name: (document.getElementById('a-name') as HTMLInputElement).value.trim(),
-                phone: (document.getElementById('a-phone') as HTMLInputElement).value.trim() || undefined,
-                join_slug: c.slug,
-              },
-            },
-          });
-          if (error) throw error;
-          if (data.session) {
-            toast(c.open_join !== false ? `Welcome to ${c.name}! 🎉` : 'Account created — the club will approve you shortly.');
-            await activateAndGo(c);
-          } else {
-            (document.getElementById('auth-form') as HTMLFormElement).outerHTML =
-              '<p class="text-sm text-mist-300">📧 Check your email to confirm your account, then sign in here — your club membership is already set up.</p>';
-          }
-        } catch (e) {
-          toast(errMsg(e), 'err');
-        }
-      });
-    }
-
-    function shopHtml(c: Site) {
-      return (c.shop ?? []).length
-        ? `<div class="surface-card p-5 mt-4">
-            <p class="text-sm font-semibold mb-2">🛍️ Club shop</p>
-            ${(c.shop ?? [])
-              .map(
-                (s) => `<div class="py-2 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-2">
-                    ${s.image_url ? `<img src="${esc(s.image_url)}" alt="" class="w-10 h-10 rounded object-cover" loading="lazy" />` : ''}
-                    <p class="text-sm">${esc(s.name)}${s.description ? ` <span class="text-xs text-mist-500">· ${esc(s.description)}</span>` : ''}</p>
-                  </div>
-                  <span class="text-sm font-semibold">£${Number(s.price).toFixed(2)}${s.in_stock ? '' : ' <span class="pill">out of stock</span>'}</span>
-                </div>`
-              )
-              .join('')}
-            <p class="text-xs text-mist-500 mt-2">Join the club to order — collection at training.</p>
-          </div>`
-        : '';
-    }
-
-    function eventsHtml(c: Site) {
-      return (c.events ?? []).length
-        ? `<div class="surface-card p-5 mt-4">
-            <p class="text-sm font-semibold mb-2">🎪 Coming up</p>
-            ${(c.events ?? [])
-              .map(
-                (e) => `<div class="py-1.5 border-t border-ink-700 first:border-0 flex items-center justify-between gap-2">
-                  <p class="text-sm">${esc(e.name)}
-                    <span class="text-xs text-mist-500">· ${new Date(e.event_date + 'T00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}${e.start_time ? ' ' + e.start_time.slice(0, 5) : ''}</span></p>
-                  ${Number(e.fee) > 0 ? `<span class="text-sm">£${Number(e.fee).toFixed(2)}</span>` : ''}
-                </div>`
-              )
-              .join('')}
-          </div>`
-        : '';
-    }
-
-    function contactHtml(c: Site) {
-      return `<div class="surface-card p-5 mt-4">
-        <p class="text-sm font-semibold mb-2">📬 Ask ${esc(c.name)} anything</p>
-        <div class="grid gap-2">
-          <input class="field" id="e-name" placeholder="Your name" />
-          <input class="field" id="e-email" type="email" placeholder="you@email.com" />
-          <textarea class="field" id="e-msg" rows="3" placeholder="Ages, experience, what you're looking for…"></textarea>
-          <button class="btn btn-primary btn-sm" id="e-go">Send enquiry</button>
-        </div>
-      </div>`;
-    }
+    document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab!)));
 
     async function render() {
-      if (!slug && onCustomDomain) {
-        const { data: resolved } = await supabase.rpc('resolve_club_domain', { p_host: location.hostname });
-        if (resolved) slug = resolved;
-        // subdomain-per-club: blaze.<platform-domain> -> slug "blaze"
-        if (!slug) {
-          const label = location.hostname.split('.')[0];
-          if (label && !['www', 'app'].includes(label)) slug = label;
-        }
-      }
-      if (!slug) {
-        portal.innerHTML = '<p class="text-center text-mist-500">No club specified.</p>';
-        return;
-      }
-      const [{ data }, { data: session }] = await Promise.all([
-        supabase.rpc('get_club_public', { p_slug: slug }),
-        supabase.auth.getSession(),
-      ]);
-      if (!data) {
-        portal.innerHTML = `
-          <div class="surface-card p-8 text-center">
-            <h1 class="text-xl">Club not found</h1>
-            <p class="text-sm text-mist-500 mt-2">This club may have closed or changed its link.</p>
-            <a href="/" class="btn btn-ghost btn-sm mt-4">Ignyte Club Manager</a>
-          </div>`;
-        return;
-      }
-      const c = data as Site;
-      if (c.accent_color) {
-        document.documentElement.style.setProperty('--color-ignite-500', c.accent_color);
-        document.documentElement.style.setProperty('--color-ignite-400', c.accent_color);
-        document.documentElement.style.setProperty('--color-ignite-600', c.accent_color);
-      }
-      const signedIn = Boolean(session.session);
-      document.title = c.name;
-      if (signedIn) document.getElementById('openapp-footer')?.classList.remove('hidden');
-      const siteMode = c.website && (c.pages ?? []).length > 0;
+      const club = ctx.club!;
+      const opts = { staff: true, coachId: ctx.profile.id, currency: club.currency, showCoach: true, clubId: club.id, reload: () => render(), athletes: athletesForAssign, skillsFor, onJourney: openJourney };
+      const title = document.getElementById('title')!;
 
-      const hero = `
-        <div class="text-center animate-rise">
-          <div class="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center font-display font-bold text-white text-xl"
-            style="background: linear-gradient(135deg, var(--color-charge-400), var(--color-ignite-500), var(--color-spark-500))">
-            ${esc(c.name.slice(0, 2).toUpperCase())}
+      if (tab === 'today') {
+        title.textContent = 'Today';
+        const [rows, p, { data: m }] = await Promise.all([schedule(club.id, addDays(startOfDay(), -7), addDays(startOfDay(), 1)), loadPeople(), supabase.rpc('club_money', { p_club: club.id })]);
+        const mon = m as { unpaid: unknown[]; owed: number; collected_30d: number; lessons_30d: number };
+        const now = Date.now();
+        const t0 = startOfDay().getTime();
+        const today = rows.filter((r) => new Date(r.starts_at).getTime() >= t0);
+        const needsWrap = rows.filter((r) => r.lesson_status === 'booked' && new Date(r.starts_at).getTime() < now);
+        const noCoach = !p.members.some((x) => x.roles.includes('coach'));
+        const needs: string[] = [];
+        if (noCoach) needs.push('<a class="text-ignite-400" data-go="people">Add your first coach →</a>');
+        if (needsWrap.length) needs.push(`<span>${needsWrap.length} lesson${needsWrap.length === 1 ? '' : 's'} need wrapping up (attended / no-show + notes)</span>`);
+        if (mon.unpaid.length) needs.push(`<a class="text-ignite-400" data-go="money">${mon.unpaid.length} unpaid lesson${mon.unpaid.length === 1 ? '' : 's'} · ${money(mon.owed, club.currency)} owed →</a>`);
+        if (p.invites.length) needs.push(`<span>${p.invites.length} invite${p.invites.length === 1 ? '' : 's'} not signed up yet: ${p.invites.map((i) => esc(i.email)).join(', ')}</span>`);
+        if (!p.athletes.length) needs.push(`<span>No families yet — share code <code class="text-ignite-400">${esc(club.join_code ?? '')}</code> or the link in Settings</span>`);
+        content.innerHTML = `
+          <div class="grid grid-cols-3 gap-2 mb-4">
+            ${[[today.filter((r) => r.lesson_id).length, 'lessons today'], [money(mon.owed, club.currency), 'owed'], [money(mon.collected_30d, club.currency), 'collected · 30d']]
+              .map(([n, l]) => `<div class="surface-card p-3 text-center"><p class="text-xl font-display font-semibold text-ignite-400">${n}</p><p class="text-[0.65rem] uppercase tracking-widest text-mist-500">${l}</p></div>`).join('')}
           </div>
-          <h1 class="text-2xl mt-4">${esc(c.name)}</h1>
-          ${c.blurb ? `<p class="text-sm text-mist-400 mt-2">${esc(c.blurb)}</p>` : ''}
-          ${c.locations.length ? `<p class="text-xs text-mist-500 mt-2">📍 ${c.locations.map((l) => esc(l)).join(' · ')}</p>` : ''}
-        </div>`;
+          <section class="surface-card p-4 mb-4">
+            <h2 class="font-semibold mb-2">Needs you</h2>
+            ${needs.length ? `<ul class="text-sm flex flex-col gap-1.5">${needs.map((n) => `<li>• ${n}</li>`).join('')}</ul>` : '<p class="text-sm text-mist-500">All clear ✨</p>'}
+          </section>
+          ${needsWrap.length ? `<section class="surface-card p-4 mb-4 border-charge-400/40"><h2 class="font-semibold text-charge-400 mb-3">⏳ Needs wrapping up</h2>${scheduleHtml(needsWrap, opts)}</section>` : ''}
+          <section class="surface-card p-4 mb-4">
+            <h2 class="font-semibold mb-3">Today's slots</h2>
+            ${scheduleHtml(today, opts, 'No slots today.')}
+          </section>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-primary btn-sm" data-go="schedule">＋ Add slots</button>
+            <button class="btn btn-ghost btn-sm" data-go="people">＋ Invite coach / add athlete</button>
+          </div>`;
+        wireScheduleActions(content, rows, opts);
+        content.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.go!)));
+      } else if (tab === 'schedule') {
+        title.textContent = 'Schedule';
+        const start = addDays(startOfDay(), weekOffset * 7 - ((startOfDay().getDay() + 6) % 7));
+        const end = addDays(start, 7);
+        const [rows, cs] = await Promise.all([schedule(club.id, start, end), coaches()]);
+        content.innerHTML = `
+          <section class="surface-card p-4 mb-4">
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <button class="btn btn-ghost btn-sm" id="prev">←</button>
+              <h2 class="font-semibold text-sm">Week of ${fmtDate(start.toISOString().slice(0, 10))}</h2>
+              <button class="btn btn-ghost btn-sm" id="next">→</button>
+            </div>
+            ${scheduleHtml(rows, opts, 'No slots this week.')}
+          </section>
+          <section class="surface-card p-4">
+            <h2 class="font-semibold">Add slots</h2>
+            <p class="text-xs text-mist-400 mb-3">A run of back-to-back 1-2-1 slots for a coach, repeated weekly. Coaches can also add their own.</p>
+            ${cs.length ? addSlotsFormHtml(cs, { minutes: club.lesson_minutes, price_pence: club.lesson_price_pence }) : '<p class="text-sm text-mist-500">Add a coach under People first.</p>'}
+          </section>`;
+        document.getElementById('prev')!.addEventListener('click', () => { weekOffset--; render(); });
+        document.getElementById('next')!.addEventListener('click', () => { weekOffset++; render(); });
+        wireScheduleActions(content, rows, opts);
+        const f = content.querySelector<HTMLFormElement>('[data-add-slots]');
+        if (f) wireAddSlots(f, club.id, null, () => render());
+      } else if (tab === 'people') {
+        title.textContent = 'People';
+        const p = await loadPeople();
+        const parents = p.members.filter((m) => m.roles.includes('parent'));
+        const isOwner = club.roles.includes('owner');
+        content.innerHTML = `
+          <section class="surface-card p-4 mb-4">
+            <h2 class="font-semibold">Add someone by email</h2>
+            <p class="text-xs text-mist-400 mb-3">Already on Ignyte? They're in immediately. Not yet? They get these roles the moment they sign up with this email.</p>
+            <form id="invite" class="flex flex-wrap gap-2 items-center">
+              <input class="field flex-1 min-w-48" name="email" type="email" required placeholder="coach@example.com" />
+              ${ROLES.filter((r) => r !== 'owner' || isOwner).map((r) => `<label class="pill cursor-pointer has-checked:text-ignite-400 has-checked:border-ignite-500"><input type="checkbox" class="sr-only" name="role" value="${r}" ${r === 'coach' ? 'checked' : ''} />${r}</label>`).join('')}
+              <button class="btn btn-primary btn-sm" type="submit">Add</button>
+            </form>
+            ${p.invites.length ? `<div class="mt-3 text-xs text-mist-400">Waiting to sign up: ${p.invites.map((i) => `<span class="pill">${esc(i.email)} · ${i.roles.join('+')} <button data-uninvite="${i.id}" title="Withdraw">✕</button></span>`).join(' ')}</div>` : ''}
+          </section>
+          <section class="surface-card p-4 mb-4">
+            <h2 class="font-semibold mb-2">Staff & families <span class="text-mist-500 text-sm font-normal">(${p.members.length})</span></h2>
+            <div class="flex flex-col gap-1.5">
+              ${p.members.map((m) => `
+                <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5" data-member="${m.id}">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <span class="flex-1"><b>${esc(m.name)}</b> ${m.roles.map((r) => `<span class="pill ${r === 'owner' ? 'pill-accent' : r === 'coach' ? 'pill-success' : ''}">${r}</span>`).join(' ')}
+                      <span class="block text-xs text-mist-500">${esc(m.email)}${m.phone ? ' · ' + esc(m.phone) : ''}</span></span>
+                    <button class="btn btn-ghost btn-sm" data-edit-member="${m.id}">Edit</button>
+                  </div>
+                  <div class="m-panel hidden mt-2"></div>
+                </div>`).join('')}
+            </div>
+          </section>
+          <section class="surface-card p-4">
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h2 class="font-semibold">Athletes <span class="text-mist-500 text-sm font-normal">(${p.athletes.filter((a) => a.active).length})</span></h2>
+              <button class="btn btn-ghost btn-sm" id="add-ath">＋ Add athlete</button>
+            </div>
+            <div id="new-ath"></div>
+            <div class="flex flex-col gap-1.5 mt-2">
+              ${p.athletes.map((a) => `
+                <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5 ${a.active ? '' : 'opacity-50'}" data-ath="${a.id}">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <span class="flex-1"><b>${esc(a.name)}</b> ${a.dob ? `<span class="text-xs text-mist-500">(${ageFromDob(a.dob)})</span>` : ''} ${a.medical ? '<span class="pill pill-warn">🚑</span>' : ''} ${a.profile_id ? '<span class="pill">own login</span>' : ''} ${a.active ? '' : '<span class="pill">inactive</span>'}
+                      <span class="block text-xs text-mist-500">${a.parent_name ? esc(a.parent_name) + (a.parent_phone ? ' · ' + esc(a.parent_phone) : '') : a.own_email ? esc(a.own_email) : ''} · ${a.lessons} lesson${a.lessons === 1 ? '' : 's'}${a.next ? ' · next ' + fmtWhen(a.next) : ''}</span></span>
+                    <button class="btn btn-ghost btn-sm" data-journey="${a.id}">Progress</button>
+                    <button class="btn btn-ghost btn-sm" data-edit-ath="${a.id}">Edit</button>
+                  </div>
+                  <div class="a-panel hidden mt-2"></div>
+                </div>`).join('') || '<p class="text-sm text-mist-500">No athletes yet. Families add their own when they join, or add one here.</p>'}
+            </div>
+          </section>`;
 
-      const bookCallout = `
-        <div class="surface-card p-5 mt-6">
-          <p class="text-sm font-semibold">⚡ Book 1-2-1 private lessons online</p>
-          <p class="text-xs text-mist-500 mt-1">${c.upcoming_slots} slot${c.upcoming_slots === 1 ? '' : 's'} open in the next two weeks.</p>
-        </div>`;
-
-      // Branded front door: works with or without the full site.
-      if (pageSlug === 'login' || pageSlug === 'join') {
-        const mode = pageSlug as 'login' | 'join';
-        portal.innerHTML = hero + authHtml(c, mode);
-        wireAuth(c, mode);
-        return;
-      }
-
-      if (!siteMode) {
-        portal.innerHTML =
-          hero + bookCallout + classesHtml(c) + eventsHtml(c) + shopHtml(c) + coachesHtml(c) + contactHtml(c) + joinHtml(c, signedIn);
+        document.getElementById('invite')!.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.currentTarget as HTMLFormElement;
+          const roles = [...form.querySelectorAll<HTMLInputElement>('input[name=role]:checked')].map((c) => c.value);
+          const { data, error } = await supabase.rpc('invite_person', { p_club: club.id, p_email: (form.elements.namedItem('email') as HTMLInputElement).value.trim(), p_roles: roles });
+          if (error) return toast(errMsg(error), 'err');
+          toast(data === 'added' ? 'Added — they can sign in and see the club now.' : 'Invited — they get access as soon as they sign up with that email.');
+          render();
+        });
+        content.querySelectorAll<HTMLButtonElement>('[data-uninvite]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            await supabase.from('invites').delete().eq('id', b.dataset.uninvite);
+            render();
+          })
+        );
+        content.querySelectorAll<HTMLButtonElement>('[data-edit-member]').forEach((b) =>
+          b.addEventListener('click', () => {
+            const m = p.members.find((x) => x.id === b.dataset.editMember)!;
+            const panel = content.querySelector<HTMLElement>(`[data-member="${m.id}"] .m-panel`)!;
+            if (!panel.classList.contains('hidden')) return panel.classList.add('hidden');
+            panel.classList.remove('hidden');
+            const lockOwner = m.roles.includes('owner') && !isOwner;
+            panel.innerHTML = `
+              <form class="rounded-lg bg-ink-850 border border-ink-700 p-3 grid sm:grid-cols-2 gap-2.5" data-member-form>
+                <div><label class="form-label">Name</label><input class="field" name="name" value="${esc(m.name)}" required /></div>
+                <div><label class="form-label">Mobile</label><input class="field" name="phone" value="${esc(m.phone ?? '')}" /></div>
+                <div class="sm:col-span-2"><label class="form-label">Roles</label><div class="flex flex-wrap gap-1.5">
+                  ${ROLES.map((r) => `<label class="pill cursor-pointer has-checked:text-ignite-400 has-checked:border-ignite-500"><input type="checkbox" class="sr-only" name="role" value="${r}" ${m.roles.includes(r) ? 'checked' : ''} ${(r === 'owner' && !isOwner) || lockOwner ? 'disabled' : ''} />${r}</label>`).join('')}
+                  ${m.roles.includes('athlete') ? '<span class="pill">athlete</span>' : ''}
+                </div><p class="text-xs text-mist-500 mt-1">Untick everything to remove them from the club.</p></div>
+                <div class="sm:col-span-2 flex gap-2"><button class="btn btn-primary btn-sm">Save</button></div>
+              </form>`;
+            panel.querySelector('form')!.addEventListener('submit', async (e) => {
+              e.preventDefault();
+              const f = e.currentTarget as HTMLFormElement;
+              const roles = [...f.querySelectorAll<HTMLInputElement>('input[name=role]:checked')].map((c) => c.value);
+              if (m.roles.includes('athlete')) roles.push('athlete');
+              if (!roles.filter((r) => r !== 'athlete').length && !confirm(`Remove ${m.name} from the club?`)) return;
+              const { error: e1 } = await supabase.rpc('update_person', { p_club: club.id, p_profile: m.id, p_name: (f.elements.namedItem('name') as HTMLInputElement).value.trim(), p_phone: (f.elements.namedItem('phone') as HTMLInputElement).value.trim() });
+              if (e1) return toast(errMsg(e1), 'err');
+              if (roles.join() !== m.roles.join()) {
+                const { error: e2 } = await supabase.rpc('set_member_roles', { p_club: club.id, p_profile: m.id, p_roles: roles });
+                if (e2) return toast(errMsg(e2), 'err');
+              }
+              toast('Saved');
+              render();
+            });
+          })
+        );
+        const athForm = (a?: Person) => `
+          <form class="rounded-lg bg-ink-850 border border-ink-700 p-3 grid sm:grid-cols-2 gap-2.5" data-ath-form="${a?.id ?? ''}">
+            <div><label class="form-label">Name</label><input class="field" name="name" required maxlength="60" value="${esc(a?.name ?? '')}" /></div>
+            <div><label class="form-label">Date of birth</label><input class="field" name="dob" type="date" value="${a?.dob ?? ''}" /></div>
+            ${!a ? `<div class="sm:col-span-2"><label class="form-label">Parent / guardian</label><select class="field" name="parent"><option value="">— none yet (link a login later) —</option>${parents.map((m) => `<option value="${m.id}">${esc(m.name)} · ${esc(m.email)}</option>`).join('')}</select>
+              <p class="text-xs text-mist-500 mt-1">Parents not listed? Ask them to sign up with code <code class="text-ignite-400">${esc(club.join_code ?? '')}</code> — they can add their own children.</p></div>` : ''}
+            <div class="sm:col-span-2"><label class="form-label">Medical / allergies</label><input class="field" name="medical" value="${esc(a?.medical ?? '')}" /></div>
+            <div><label class="form-label">Goal</label><input class="field" name="goals" maxlength="200" value="${esc(a?.goals ?? '')}" /></div>
+            <div><label class="form-label">Staff notes</label><input class="field" name="notes" value="${esc(a?.notes ?? '')}" /></div>
+            ${a ? `<div class="sm:col-span-2 flex flex-wrap gap-3 items-center"><label class="text-sm"><input type="checkbox" name="active" ${a.active ? 'checked' : ''} /> Active</label>
+              ${!a.profile_id ? `<span class="flex gap-1.5 items-center text-xs text-mist-400">Own login: <input class="field !w-48 !py-1 !text-xs" name="link" type="email" placeholder="athlete@email" /><button class="btn btn-ghost btn-sm" type="button" data-link="${a.id}">Link</button></span>` : ''}</div>` : ''}
+            <div class="sm:col-span-2 flex gap-2"><button class="btn btn-primary btn-sm">Save</button><button class="btn btn-ghost btn-sm" type="button" data-close>Close</button></div>
+          </form>`;
+        const wireAth = (host: HTMLElement, a?: Person) => {
+          const f = host.querySelector<HTMLFormElement>('[data-ath-form]')!;
+          f.querySelector('[data-close]')!.addEventListener('click', () => { host.innerHTML = ''; host.classList.add('hidden'); });
+          f.querySelector<HTMLButtonElement>('[data-link]')?.addEventListener('click', async () => {
+            const email = (f.elements.namedItem('link') as HTMLInputElement).value.trim();
+            const { error } = await supabase.rpc('link_athlete_login', { p_athlete: a!.id, p_email: email });
+            if (error) return toast(errMsg(error), 'err');
+            toast('Linked — they now have the athlete portal.');
+            render();
+          });
+          f.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const d = new FormData(f);
+            if (!a && !d.get('parent')) return toast('Pick a parent, or ask the family to sign up with the club code and add the athlete themselves.', 'err');
+            const { error } = await supabase.rpc('save_athlete', {
+              p_club: club.id, p_id: a?.id ?? null, p_name: String(d.get('name')).trim(), p_dob: d.get('dob') || null,
+              p_medical: d.get('medical'), p_notes: d.get('notes'), p_goals: d.get('goals'), p_parent: a ? null : d.get('parent') || null,
+              p_active: a ? d.get('active') === 'on' : true,
+            });
+            if (error) return toast(errMsg(error), 'err');
+            toast('Saved');
+            render();
+          });
+        };
+        document.getElementById('add-ath')!.addEventListener('click', () => { const h = document.getElementById('new-ath')!; h.innerHTML = athForm(); wireAth(h); });
+        content.querySelectorAll<HTMLButtonElement>('[data-edit-ath]').forEach((b) =>
+          b.addEventListener('click', () => {
+            const a = p.athletes.find((x) => x.id === b.dataset.editAth)!;
+            const panel = content.querySelector<HTMLElement>(`[data-ath="${a.id}"] .a-panel`)!;
+            panel.classList.remove('hidden');
+            panel.innerHTML = athForm(a);
+            wireAth(panel, a);
+          })
+        );
+        content.querySelectorAll<HTMLButtonElement>('[data-journey]').forEach((b) =>
+          b.addEventListener('click', () => {
+            const panel = content.querySelector<HTMLElement>(`[data-ath="${b.dataset.journey}"] .a-panel`)!;
+            if (!panel.classList.contains('hidden') && panel.dataset.kind === 'j') return panel.classList.add('hidden');
+            panel.dataset.kind = 'j';
+            panel.classList.remove('hidden');
+            loadJourney(b.dataset.journey!, panel);
+          })
+        );
+      } else if (tab === 'money') {
+        title.textContent = 'Money';
+        const { data, error } = await supabase.rpc('club_money', { p_club: club.id });
+        if (error) throw error;
+        const m = data as { unpaid: { lesson_id: string; starts_at: string; status: string; price_pence: number; athlete_name: string; coach_name: string; payer_name: string | null; payer_email: string | null; late_cancel: boolean }[]; owed: number; collected_30d: number; lessons_30d: number };
+        content.innerHTML = `
+          <div class="grid grid-cols-3 gap-2 mb-4">
+            ${[[money(m.owed, club.currency), 'owed'], [money(m.collected_30d, club.currency), 'collected · 30d'], [m.lessons_30d, 'lessons · 30d']]
+              .map(([n, l]) => `<div class="surface-card p-3 text-center"><p class="text-xl font-display font-semibold text-ignite-400">${n}</p><p class="text-[0.65rem] uppercase tracking-widest text-mist-500">${l}</p></div>`).join('')}
+          </div>
+          <section class="surface-card p-4">
+            <h2 class="font-semibold">Unpaid lessons</h2>
+            <p class="text-xs text-mist-400 mb-3">Families pay you directly (cash / bank transfer). Tick each lesson off as the money lands — no card fees, nothing to set up.</p>
+            ${m.unpaid.length ? `<div class="flex flex-col gap-1.5">${m.unpaid.map((u) => `
+              <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5 flex flex-wrap items-center gap-2 text-sm">
+                <span class="flex-1"><b>${esc(u.athlete_name)}</b> · ${fmtWhen(u.starts_at)} · ${esc(u.coach_name)} ${u.status === 'cancelled' ? '<span class="pill pill-danger">late cancel</span>' : u.status === 'no_show' ? '<span class="pill pill-danger">no-show</span>' : u.status === 'booked' ? '<span class="pill pill-warn">not wrapped up</span>' : ''}
+                  <span class="block text-xs text-mist-500">${esc(u.payer_name ?? '')} ${u.payer_email ? '· ' + esc(u.payer_email) : ''}</span></span>
+                <b>${money(u.price_pence, club.currency)}</b>
+                <button class="btn btn-primary btn-sm" data-paid="${u.lesson_id}">Paid ✓</button>
+              </div>`).join('')}</div>` : '<p class="text-sm text-mist-500">Nothing outstanding 🎉</p>'}
+          </section>`;
+        content.querySelectorAll<HTMLButtonElement>('[data-paid]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            const { error: e } = await supabase.rpc('mark_paid', { p_lesson: b.dataset.paid, p_paid: true });
+            if (e) return toast(errMsg(e), 'err');
+            render();
+          })
+        );
       } else {
-        const navItems: [string, string][] = [
-          ['Home', ''],
-          ...c.pages.filter((p) => p.slug !== 'home').map((p) => [p.title, p.slug] as [string, string]),
-          ['Classes', 'classes'],
-          ...((c.shop ?? []).length ? [['Shop', 'shop'] as [string, string]] : []),
-          ['Contact', 'contact'],
-          ...(signedIn ? [] : [['Sign in', 'login'] as [string, string]]),
-        ];
-        const nav = `<nav class="flex flex-wrap gap-1.5 justify-center mt-6 mb-2">
-          ${navItems
-            .map(
-              ([label, s]) =>
-                `<a href="${link(s)}" class="btn btn-sm ${s === pageSlug ? 'btn-primary' : 'btn-ghost'}">${esc(label)}</a>`
-            )
-            .join('')}
-        </nav>`;
-
-        const page = c.pages.find((p) => p.slug === pageSlug);
-        const homePage = c.pages.find((p) => p.slug === 'home');
-        let bodyHtml: string;
-        if (pageSlug === 'classes') bodyHtml = classesHtml(c) + joinHtml(c, signedIn);
-        else if (pageSlug === 'shop') bodyHtml = shopHtml(c) + joinHtml(c, signedIn);
-        else if (pageSlug === 'coaches') bodyHtml = coachesHtml(c) || '<p class="text-sm text-mist-500 mt-4">Coach profiles coming soon.</p>';
-        else if (pageSlug === 'contact') bodyHtml = contactHtml(c);
-        else if (page?.blocks?.length) bodyHtml = renderBlocks(c, page.blocks, signedIn);
-        else if (page) bodyHtml = `<div class="surface-card p-6 mt-4 text-left">${md(page.body)}</div>`;
-        else if (homePage?.blocks?.length) bodyHtml = renderBlocks(c, homePage.blocks, signedIn) + joinHtml(c, signedIn); // built home
-        else bodyHtml = bookCallout + classesHtml(c) + eventsHtml(c) + coachesHtml(c) + joinHtml(c, signedIn); // default home
-
-        portal.innerHTML = hero + nav + bodyHtml;
+        title.textContent = 'Settings';
+        const link = `${location.origin}/signup?code=${club.join_code ?? ''}`;
+        content.innerHTML = `
+          <section class="surface-card p-4 mb-4">
+            <h2 class="font-semibold mb-1">Families join with this</h2>
+            <p class="text-sm">Club code <code class="text-ignite-400 text-lg">${esc(club.join_code ?? '')}</code></p>
+            <p class="text-xs text-mist-400 break-all mt-1">Sign-up link: <a class="text-ignite-400" href="${link}">${link}</a></p>
+            <div class="flex gap-2 mt-2"><button class="btn btn-ghost btn-sm" id="copy">Copy link</button><button class="btn btn-ghost btn-sm" id="regen">New code</button></div>
+          </section>
+          <form class="surface-card p-4 grid sm:grid-cols-2 gap-3" id="settings">
+            <div class="sm:col-span-2"><label class="form-label">Club name</label><input class="field" name="name" required maxlength="60" value="${esc(club.name)}" /></div>
+            <div class="sm:col-span-2"><label class="form-label">Venue</label><input class="field" name="venue" value="${esc(club.venue ?? '')}" /></div>
+            <div><label class="form-label">Default lesson length</label><select class="field" name="minutes">${[15, 20, 30, 45, 60].map((x) => `<option value="${x}" ${x === club.lesson_minutes ? 'selected' : ''}>${x} min</option>`).join('')}</select></div>
+            <div><label class="form-label">Default price (£)</label><input class="field" name="price" type="number" min="0" step="0.5" value="${(club.lesson_price_pence / 100).toFixed(2)}" /></div>
+            <div><label class="form-label">Free cancellation notice (hours)</label><input class="field" name="cancel" type="number" min="0" max="168" value="${club.cancel_hours}" /></div>
+            <div><label class="form-label">Timezone</label><select class="field" name="tz">${['Europe/London', 'Europe/Dublin', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Australia/Sydney'].map((z) => `<option ${z === club.timezone ? 'selected' : ''}>${z}</option>`).join('')}</select></div>
+            <button class="btn btn-primary sm:col-span-2" type="submit">Save settings</button>
+          </form>`;
+        document.getElementById('copy')!.addEventListener('click', async () => { await navigator.clipboard?.writeText(link); toast('Link copied'); });
+        document.getElementById('regen')!.addEventListener('click', async () => {
+          if (!confirm('Make a new club code? The old one stops working.')) return;
+          const { error } = await supabase.rpc('regenerate_join_code', { p_club: club.id });
+          if (error) return toast(errMsg(error), 'err');
+          location.reload();
+        });
+        document.getElementById('settings')!.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const f = new FormData(e.currentTarget as HTMLFormElement);
+          const { error } = await supabase.rpc('update_club', {
+            p_club: club.id, p_name: String(f.get('name')).trim(), p_venue: f.get('venue'), p_lesson_minutes: Number(f.get('minutes')),
+            p_price_pence: Math.round(Number(f.get('price')) * 100), p_cancel_hours: Number(f.get('cancel')), p_timezone: f.get('tz'),
+          });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Saved');
+          location.reload();
+        });
       }
-
-      document.getElementById('e-go')?.addEventListener('click', async () => {
-        const name = (document.getElementById('e-name') as HTMLInputElement).value;
-        const email = (document.getElementById('e-email') as HTMLInputElement).value;
-        const msg = (document.getElementById('e-msg') as HTMLTextAreaElement).value;
-        const { error } = await supabase.rpc('submit_club_enquiry', { p_slug: slug, p_name: name, p_email: email, p_message: msg });
-        if (error) return toast(errMsg(error), 'err');
-        portal.querySelectorAll<HTMLInputElement>('#e-name,#e-email,#e-msg').forEach((i) => (i.value = ''));
-        toast('Sent! The club will get back to you. 📬');
-      });
-
-      document.getElementById('p-join')?.addEventListener('click', async () => {
-        const code = ((document.getElementById('p-code') as HTMLInputElement | null)?.value ?? '').trim();
-        try {
-          if (code) {
-            const { data: res, error } = await supabase.rpc('join_by_code', { p_code: code });
-            if (error) throw error;
-            await setActiveClub((res as { club_id: string }).club_id);
-            toast(`Welcome to ${c.name}! 🎉`);
-            setTimeout(() => (location.href = '/dashboard'), 800);
-          } else {
-            const { data: res, error } = await supabase.rpc('request_join', { p_slug: c.slug });
-            if (error) throw error;
-            if ((res as { status: string }).status === 'active') {
-              location.href = '/dashboard';
-            } else {
-              toast('Request sent — the club will approve you shortly.');
-            }
-          }
-        } catch (e) {
-          toast(errMsg(e), 'err');
-        }
-      });
     }
 
-    render().catch((e) => toast(errMsg(e), 'err'));
+    async function loadJourney(athleteId: string, panel: HTMLElement) {
+      const { data, error } = await supabase.rpc('athlete_journey', { p_athlete: athleteId });
+      if (error) return toast(errMsg(error), 'err');
+      panel.innerHTML = journeyHtml(data as JourneyData, { editable: true });
+      wireJourneyEditing(panel, athleteId, () => loadJourney(athleteId, panel));
+    }
+    function openJourney(athleteId: string) {
+      setTab('people');
+      setTimeout(() => {
+        const btn = content.querySelector<HTMLButtonElement>(`[data-journey="${athleteId}"]`);
+        btn?.click();
+        btn?.scrollIntoView({ block: 'center' });
+      }, 600);
+    }
+
+    (async () => {
+      ctx = await requireAuth(['owner', 'admin']);
+      document.getElementById('eyebrow')!.textContent = ctx.club!.roles.includes('owner') ? 'Club owner' : 'Club admin';
+      setTab(tab);
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
   </script>
 </AppLayout>

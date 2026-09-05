@@ -1,5 +1,5 @@
 /*
- * Ignyte Club Manager — service worker
+ * Ignyte 1-2-1 — service worker
  *
  * Strategy:
  *  - App pages (navigations): network-first, falling back to the cached copy,
@@ -17,34 +17,15 @@ const DATA_CACHE = `ignyte-data-${VERSION}`;
 
 const SHELL_URLS = [
   '/',
-  '/offline',
-  '/about',
-  '/pricing',
-  '/contact',
-  '/clubs',
-  '/start',
-  '/club',
-  '/login',
+  '/signup',
   '/dashboard',
-  '/book',
-  '/bookings',
-  '/classes',
-  '/money',
-  '/shop',
-  '/events',
-  '/waiver',
-  '/admin/shop',
-  '/admin/events',
-  '/athletes',
-  '/progress',
+  '/hq',
+  '/club',
   '/coach',
-  '/coach/classes',
-  '/admin',
-  '/admin/classes',
-  '/admin/money',
-  '/admin/import',
-  '/admin/website',
-  '/welcome',
+  '/family',
+  '/me',
+  '/book',
+  '/offline',
   '/site.webmanifest',
   '/icon-192.png',
   '/icon-512.png',

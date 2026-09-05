@@ -1,0 +1,171 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Family">
+  <p class="eyebrow">Family</p>
+  <div class="flex flex-wrap items-center justify-between gap-2 mt-1 mb-4">
+    <h1 class="text-2xl" id="title">Your lessons</h1>
+    <a href="/book?back=/family" class="btn btn-primary btn-sm">＋ Book a lesson</a>
+  </div>
+  <div id="content"><p class="text-sm text-mist-500">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requireAuth, myAthletes, esc, toast, errMsg, money, fmtWhen, fmtDate, ageFromDob, statusPill, journeyHtml, type Ctx, type Athlete, type JourneyData } from '../lib/app';
+
+    const content = document.getElementById('content')!;
+    let ctx: Ctx;
+
+    type Lesson = { lesson_id: string; status: string; paid: boolean; late_cancel: boolean; starts_at: string; minutes: number; price_pence: number; coach_name: string; athlete_id: string; athlete_name: string; notes: string | null; homework: string | null; worked_on: string[] };
+
+    function athleteForm(a: Partial<Athlete> & { self?: boolean } = {}): string {
+      return `
+        <form class="rounded-lg bg-ink-850 border border-ink-700 p-3 grid sm:grid-cols-2 gap-2.5" data-ath-form="${a.id ?? ''}" data-self="${a.self ? 1 : 0}">
+          <div><label class="form-label">Name</label><input class="field" name="name" required maxlength="60" value="${esc(a.name ?? '')}" /></div>
+          <div><label class="form-label">Date of birth</label><input class="field" name="dob" type="date" value="${a.dob ?? ''}" /></div>
+          <div class="sm:col-span-2"><label class="form-label">Medical / allergies <span class="text-mist-500 font-normal">(coaches see this)</span></label><input class="field" name="medical" value="${esc(a.medical_notes ?? '')}" /></div>
+          <div class="sm:col-span-2"><label class="form-label">Goal <span class="text-mist-500 font-normal">(what they'd love to nail)</span></label><input class="field" name="goals" maxlength="200" value="${esc(a.goals ?? '')}" /></div>
+          <div class="sm:col-span-2 flex gap-2"><button class="btn btn-primary btn-sm" type="submit">Save</button><button class="btn btn-ghost btn-sm" type="button" data-close>Cancel</button></div>
+        </form>`;
+    }
+
+    async function render() {
+      const club = ctx.club!;
+      const [athletes, { data: lessonsRaw }] = await Promise.all([myAthletes(club.id), supabase.rpc('my_lessons', { p_club: club.id })]);
+      const lessons = (lessonsRaw ?? []) as Lesson[];
+      const now = Date.now();
+      const upcoming = lessons.filter((l) => l.status === 'booked' && new Date(l.starts_at).getTime() >= now).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+      const past = lessons.filter((l) => !(l.status === 'booked' && new Date(l.starts_at).getTime() >= now));
+      const owed = lessons.filter((l) => !l.paid && (['completed', 'no_show'].includes(l.status) || (l.status === 'cancelled' && l.late_cancel) || (l.status === 'booked' && new Date(l.starts_at).getTime() < now)));
+      const owedTotal = owed.reduce((s, l) => s + l.price_pence, 0);
+      const isSelf = athletes.some((a) => a.profile_id === ctx.profile.id);
+
+      content.innerHTML = `
+        <section class="surface-card p-4 mb-4">
+          <h2 class="font-semibold mb-2">Upcoming</h2>
+          ${upcoming.length ? `<div class="flex flex-col gap-1.5">${upcoming.map((l) => `
+            <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5 flex flex-wrap items-center gap-2 text-sm">
+              <span class="flex-1"><b>${esc(l.athlete_name)}</b> with ${esc(l.coach_name)}<span class="block text-xs text-mist-400">${fmtWhen(l.starts_at)} · ${l.minutes} min · ${money(l.price_pence, club.currency)}</span></span>
+              <button class="btn btn-ghost btn-sm" data-cancel="${l.lesson_id}">Cancel</button>
+            </div>`).join('')}</div>` : `<p class="text-sm text-mist-500">Nothing booked. <a class="text-ignite-400" href="/book?back=/family">Book a lesson →</a></p>`}
+          ${club.venue ? `<p class="text-xs text-mist-500 mt-2">📍 ${esc(club.venue)} · cancel free up to ${club.cancel_hours}h before</p>` : ''}
+        </section>
+
+        ${owed.length ? `<section class="surface-card p-4 mb-4 border-charge-400/40">
+          <h2 class="font-semibold text-charge-400">💷 To pay · ${money(owedTotal, club.currency)}</h2>
+          <p class="text-xs text-mist-400 mb-2">Pay ${esc(club.name)} directly (cash or bank transfer) — they'll mark it as paid here.</p>
+          <div class="flex flex-col gap-1">${owed.map((l) => `<p class="text-sm flex justify-between gap-2"><span>${esc(l.athlete_name)} · ${fmtWhen(l.starts_at)} ${l.status === 'cancelled' ? '<span class="text-xs text-mist-500">(late cancel)</span>' : ''}</span><b>${money(l.price_pence, club.currency)}</b></p>`).join('')}</div>
+        </section>` : ''}
+
+        <section class="surface-card p-4 mb-4" id="athletes">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <h2 class="font-semibold">Your athletes</h2>
+            <div class="flex gap-1.5">
+              ${!isSelf ? '<button class="btn btn-ghost btn-sm" data-add-self>I train too</button>' : ''}
+              <button class="btn btn-ghost btn-sm" data-add-child>＋ Add a child</button>
+            </div>
+          </div>
+          <div id="new-ath"></div>
+          <div class="flex flex-col gap-2 mt-2">
+            ${athletes.map((a) => `
+              <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5" data-ath="${a.id}">
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                  <span class="flex-1"><b>${esc(a.name)}</b> ${a.profile_id === ctx.profile.id ? '<span class="pill pill-accent">you</span>' : ''} ${a.dob ? `<span class="text-xs text-mist-500">${ageFromDob(a.dob)} · born ${fmtDate(a.dob)}</span>` : ''}
+                    ${a.goals ? `<span class="block text-xs text-mist-400">🎯 ${esc(a.goals)}</span>` : ''}</span>
+                  <a class="btn btn-primary btn-sm" href="/book?athlete=${a.id}&back=/family">Book</a>
+                  <button class="btn btn-ghost btn-sm" data-journey="${a.id}">Progress</button>
+                  <button class="btn btn-ghost btn-sm" data-edit="${a.id}">Edit</button>
+                </div>
+                <div class="a-panel hidden mt-3"></div>
+              </div>`).join('') || '<p class="text-sm text-mist-500">No athletes yet — add a child, or yourself.</p>'}
+          </div>
+        </section>
+
+        <section class="surface-card p-4 mb-4">
+          <h2 class="font-semibold mb-2">Past lessons & coach notes</h2>
+          ${past.length ? `<div class="flex flex-col gap-1.5">${past.slice(0, 30).map((l) => `
+            <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5 text-sm">
+              <div class="flex flex-wrap items-center justify-between gap-2"><span><b>${esc(l.athlete_name)}</b> · ${fmtWhen(l.starts_at)} · ${esc(l.coach_name)}</span><span>${statusPill(l.status)} ${l.paid ? '<span class="pill pill-success">paid</span>' : ''}</span></div>
+              ${l.worked_on?.length ? `<p class="text-xs text-mist-400 mt-1">Worked on: ${l.worked_on.map(esc).join(', ')}</p>` : ''}
+              ${l.notes ? `<p class="text-xs mt-1">📝 ${esc(l.notes)}</p>` : ''}
+              ${l.homework ? `<p class="text-xs mt-1 text-charge-400">🏠 Homework: ${esc(l.homework)}</p>` : ''}
+            </div>`).join('')}</div>` : '<p class="text-sm text-mist-500">Coach notes and homework appear here after each lesson.</p>'}
+        </section>
+
+        <section class="surface-card p-4">
+          <h2 class="font-semibold mb-2">Your details</h2>
+          <form class="grid sm:grid-cols-3 gap-2 items-end" id="me-form">
+            <div><label class="form-label">Name</label><input class="field" name="name" required value="${esc(ctx.profile.full_name)}" /></div>
+            <div><label class="form-label">Mobile</label><input class="field" name="phone" type="tel" value="${esc(ctx.profile.phone ?? '')}" /></div>
+            <button class="btn btn-ghost btn-sm" type="submit">Save</button>
+          </form>
+          <p class="text-xs text-mist-500 mt-2">${esc(ctx.profile.email)} · Club code for other parents: <code class="text-ignite-400">${esc(club.join_code ?? '')}</code></p>
+        </section>`;
+
+      content.querySelectorAll<HTMLButtonElement>('[data-cancel]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm(`Cancel this lesson? Cancelling less than ${club.cancel_hours}h before may still be charged.`)) return;
+          const { data, error } = await supabase.rpc('cancel_lesson', { p_lesson: b.dataset.cancel });
+          if (error) return toast(errMsg(error), 'err');
+          toast((data as { late: boolean }).late ? 'Cancelled — this was inside the notice period so the club may still charge.' : 'Lesson cancelled');
+          render();
+        })
+      );
+      const newHost = document.getElementById('new-ath')!;
+      content.querySelector('[data-add-child]')?.addEventListener('click', () => { newHost.innerHTML = athleteForm(); wireAthForm(newHost); });
+      content.querySelector('[data-add-self]')?.addEventListener('click', () => { newHost.innerHTML = athleteForm({ name: ctx.profile.full_name, self: true }); wireAthForm(newHost); });
+      content.querySelectorAll<HTMLButtonElement>('[data-edit]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const a = athletes.find((x) => x.id === b.dataset.edit)!;
+          const panel = content.querySelector<HTMLElement>(`[data-ath="${a.id}"] .a-panel`)!;
+          panel.classList.remove('hidden');
+          panel.innerHTML = athleteForm(a);
+          wireAthForm(panel);
+        })
+      );
+      content.querySelectorAll<HTMLButtonElement>('[data-journey]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const panel = content.querySelector<HTMLElement>(`[data-ath="${b.dataset.journey}"] .a-panel`)!;
+          if (!panel.classList.contains('hidden') && panel.dataset.kind === 'j') return panel.classList.add('hidden');
+          panel.dataset.kind = 'j';
+          panel.classList.remove('hidden');
+          const { data, error } = await supabase.rpc('athlete_journey', { p_athlete: b.dataset.journey });
+          if (error) return toast(errMsg(error), 'err');
+          panel.innerHTML = journeyHtml(data as JourneyData);
+        })
+      );
+      document.getElementById('me-form')!.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.currentTarget as HTMLFormElement);
+        const { error } = await supabase.rpc('update_person', { p_club: club.id, p_profile: ctx.profile.id, p_name: String(f.get('name')).trim(), p_phone: String(f.get('phone')).trim() });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Saved');
+      });
+      if (location.hash === '#athletes') document.getElementById('athletes')?.scrollIntoView();
+    }
+
+    function wireAthForm(host: HTMLElement) {
+      const form = host.querySelector<HTMLFormElement>('[data-ath-form]')!;
+      form.querySelector('[data-close]')!.addEventListener('click', () => { host.innerHTML = ''; host.classList.add('hidden'); });
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = new FormData(form);
+        const { error } = await supabase.rpc('save_athlete', {
+          p_club: ctx.club!.id, p_id: form.dataset.athForm || null, p_name: String(f.get('name')).trim(), p_dob: f.get('dob') || null,
+          p_medical: f.get('medical'), p_goals: f.get('goals'), p_self: form.dataset.self === '1',
+        });
+        if (error) return toast(errMsg(error), 'err');
+        toast('Saved');
+        render();
+      });
+    }
+
+    (async () => {
+      ctx = await requireAuth(['parent', 'athlete']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

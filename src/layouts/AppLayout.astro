@@ -1,8 +1,7 @@
 ---
 /**
- * Shell for every page. Top bar = the public website nav (Home, About,
- * Pricing, Contact). Signed-in users get a hamburger that slides the app
- * drawer out from the left (Dashboard, Book, Bookings…), role-filtered.
+ * Shell for every page: brand, the club you're working in, one chip per
+ * portal you have access to (Ignyte HQ · Club · Coach · Family · Me), sign out.
  */
 import '@fontsource-variable/inter';
 import '@fontsource-variable/space-grotesk';
@@ -11,38 +10,10 @@ import IgnyteMark from '../components/IgnyteMark.astro';
 
 interface Props {
   title: string;
-  /** Bare pages (login/signup/offline) hide the nav chrome. */
+  /** Bare pages (sign in / sign up / offline) hide the chrome. */
   chrome?: boolean;
 }
 const { title, chrome = true } = Astro.props;
-
-const siteNav = [
-  ['Home', '/'],
-  ['About', '/about'],
-  ['Pricing', '/pricing'],
-  ['Contact', '/contact'],
-];
-// [label, href, roles, feature] — feature '' = always shown for that role.
-// The nav shows only what the club's package includes (capability-gated).
-const appNav: [string, string, string, string][] = [
-  ['🏠 Dashboard', '/dashboard', 'parent,athlete,coach,admin', ''],
-  // family
-  ['⚡ Private 1-2-1', '/bookings', 'parent,athlete', 'privates'],
-  ['🤸 Classes', '/classes', 'parent,athlete', 'classes'],
-  ['🎽 Enrolments', '/enrolments', 'parent,athlete', 'enrolments'],
-  ['🔥 Progress', '/progress', 'parent,athlete', 'progress'],
-  ['💳 Payments', '/money', 'parent,athlete', 'payments'],
-  ['🛍️ Shop', '/shop', 'parent,athlete,coach', 'shop'],
-  ['🎪 Events', '/events', 'parent,athlete', 'events'],
-  ['👤 Profile', '/athletes', 'parent', ''],
-  ['📜 Forms', '/waiver', 'parent,athlete', 'forms'],
-  // coach
-  ['📣 Coaching hub', '/coach', 'coach', 'privates'],
-  ['📋 Class registers', '/coach/classes', 'coach', 'classes'],
-  // staff
-  ['🛠️ Manage club', '/admin', 'admin', ''],
-  ['👑 Owner HQ', '/owner', 'owner', ''],
-];
 ---
 
 <!doctype html>
@@ -50,8 +21,8 @@ const appNav: [string, string, string, string][] = [
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>{title} · Ignyte Club Manager</title>
-    <meta name="description" content="The club platform for cheer & dance — free club websites, classes, events, shop, memberships and 0%-fee payments, with skill progression families love." />
+    <title>{title} · Ignyte 1-2-1</title>
+    <meta name="description" content="Private 1-2-1 lesson booking, coach notes and skill progress for cheer & dance clubs." />
     <meta name="theme-color" content="#07070b" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -61,7 +32,6 @@ const appNav: [string, string, string, string][] = [
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
   <body>
-    <!-- Shared flame gradient used by every IgnyteMark on the page -->
     <svg width="0" height="0" style="position:absolute" aria-hidden="true">
       <defs>
         <linearGradient id="ignyte-flame-gradient" x1="0" y1="0" x2="0" y2="1">
@@ -72,107 +42,29 @@ const appNav: [string, string, string, string][] = [
       </defs>
     </svg>
 
-    <div
-      id="offline-banner"
-      class="hidden bg-charge-400/15 border-b border-charge-400/30 text-charge-400 text-center text-xs font-semibold py-1.5 px-4"
-    >
-      You're offline — showing your last-loaded info. Booking needs a connection.
+    <div id="offline-banner" class="hidden bg-charge-400/15 border-b border-charge-400/30 text-charge-400 text-center text-xs font-semibold py-1.5 px-4">
+      You're offline — showing what loaded last. Booking needs a connection.
     </div>
 
     {
       chrome && (
         <header class="sticky top-0 z-40 border-b border-ink-700 bg-ink-950/85 backdrop-blur-md">
-          <div class="container-app flex h-16 items-center gap-2">
-            <button
-              id="drawer-btn"
-              class="hidden rounded-lg border border-ink-600 p-2 text-mist-300 hover:text-ignite-400 hover:border-ignite-500"
-              aria-label="Open app menu"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <path d="M3 6h18M3 12h18M3 18h18" />
-              </svg>
-            </button>
-            <a href="/" class="flex items-center gap-2 shrink-0">
-              <IgnyteMark size={26} />
-              <span class="font-display font-semibold tracking-tight text-mist-100">
-                Ignyte <span class="text-mist-400 font-normal hidden sm:inline">Club Manager</span>
-              </span>
+          <div class="container-app flex h-14 items-center gap-3">
+            <a href="/dashboard" class="flex items-center gap-2 shrink-0">
+              <IgnyteMark size={24} />
+              <span class="font-display font-semibold tracking-tight text-mist-100 hidden sm:inline">Ignyte <span class="text-mist-400 font-normal">1-2-1</span></span>
             </a>
-
-            <nav class="ml-auto hidden md:flex items-center gap-1 text-sm">
-              {siteNav.map(([label, href]) => (
-                <a href={href} class="nav-link">{label}</a>
-              ))}
-            </nav>
-
-            <div class="flex items-center gap-2 ml-auto md:ml-3">
-              <a id="signin-link" href="/login" class="btn btn-primary btn-sm hidden">Sign in</a>
-              <a id="openapp-link" href="/dashboard" class="btn btn-primary btn-sm hidden">Open app</a>
-              <button
-                id="site-menu-btn"
-                class="md:hidden rounded-lg border border-ink-600 p-2 text-mist-300 hover:text-ignite-400 hover:border-ignite-500"
-                aria-label="Open menu"
-                aria-expanded="false"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" />
-                </svg>
-              </button>
-              <button
-                id="notif-btn"
-                class="relative hidden rounded-full border border-ink-600 p-2 text-mist-300 hover:text-ignite-400 hover:border-ignite-500 transition-colors"
-                aria-label="Notifications"
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-                  <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-                </svg>
-                <span id="notif-dot" class="hidden absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ignite-500 ring-2 ring-ink-950" />
-              </button>
+            <span id="chrome-club" class="text-sm text-mist-300 truncate min-w-0" />
+            <nav id="portal-nav" class="ml-auto flex items-center gap-1 overflow-x-auto text-sm" />
+            <button id="signout-btn" class="btn btn-ghost btn-sm hidden shrink-0" title="Sign out">⎋</button>
+          </div>
+          <div id="switcher" class="hidden border-t border-ink-700 bg-ink-900/95">
+            <div class="container-app py-1.5 flex flex-wrap items-center gap-2 text-xs">
+              <span class="text-mist-500">Your clubs:</span>
+              <span id="switcher-list" class="flex flex-wrap gap-1.5" />
             </div>
           </div>
-
-          <div id="site-menu" class="hidden md:hidden border-t border-ink-700 bg-ink-950/95 backdrop-blur-md">
-            <nav class="container-app py-2 flex flex-col">
-              {siteNav.map(([label, href]) => (
-                <a href={href} class="nav-link !py-2.5">{label}</a>
-              ))}
-              <a href="/login" class="nav-link !py-2.5" id="site-menu-signin">Sign in</a>
-            </nav>
-          </div>
-
-          <div
-            id="notif-panel"
-            class="hidden absolute right-3 top-[4.2rem] w-[min(92vw,22rem)] max-h-[70vh] overflow-y-auto surface-card p-2 z-50"
-          >
-            <p class="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-widest text-mist-500">Notifications</p>
-            <div id="notif-list" class="flex flex-col" />
-          </div>
         </header>
-
-        <div id="drawer-backdrop" class="hidden fixed inset-0 bg-black/60 z-40" />
-        <aside
-          id="app-drawer"
-          class="fixed left-0 top-0 z-50 h-dvh w-72 border-r border-ink-700 bg-ink-900 p-4 flex flex-col gap-1"
-        >
-          <div class="flex items-center gap-2 px-2 pb-4 border-b border-ink-700 mb-2">
-            <IgnyteMark size={24} />
-            <span id="drawer-club" class="font-display font-semibold truncate">Your club</span>
-            <button id="drawer-close" class="ml-auto btn btn-ghost btn-sm">✕</button>
-          </div>
-          <div id="club-switcher" class="hidden mb-2 pb-2 border-b border-ink-700">
-            <p class="px-2 pb-1 text-[0.65rem] font-semibold uppercase tracking-widest text-mist-500">Your clubs</p>
-            <div id="club-switcher-list"></div>
-            <a href="/clubs" class="drawer-link text-mist-400">➕ Join or start a club</a>
-          </div>
-          {appNav.map(([label, href, roles, feature]) => (
-            <a data-roles={roles} data-feature={feature} href={href} class="drawer-link hidden">{label}</a>
-          ))}
-          <div class="mt-auto pt-4 border-t border-ink-700 flex flex-col gap-2">
-            <button id="drawer-install" class="btn btn-ghost btn-sm hidden">📲 Install the app</button>
-            <button id="signout-btn" class="btn btn-ghost btn-sm">Sign out</button>
-          </div>
-        </aside>
       )
     }
 
@@ -180,329 +72,71 @@ const appNav: [string, string, string, string][] = [
       <slot />
     </main>
 
-    <div id="install-hint" class="hidden fixed bottom-4 inset-x-4 sm:left-auto sm:w-96 z-50 surface-card p-4">
-      <div class="flex items-start gap-3">
-        <IgnyteMark size={30} />
-        <div class="flex-1">
-          <p class="font-display font-semibold text-sm">Install Ignyte Club Manager</p>
-          <p class="text-xs text-mist-400 mt-0.5">Add it to your home screen for quick booking &amp; offline access.</p>
-          <div class="mt-2.5 flex gap-2">
-            <button id="install-btn" class="btn btn-primary btn-sm">Install</button>
-            <button id="install-dismiss" class="btn btn-ghost btn-sm">Not now</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <style>
-      .nav-link {
-        padding: 0.4rem 0.7rem;
+      .portal-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.35rem 0.7rem;
         border-radius: 999px;
+        border: 1px solid var(--color-ink-600);
         color: var(--color-mist-300);
         font-weight: 500;
         white-space: nowrap;
+        font-size: 0.8rem;
       }
-      .nav-link:hover {
-        color: var(--color-ignite-400);
-        background: var(--color-ink-800);
-      }
-      .drawer-link {
-        display: block;
-        padding: 0.65rem 0.8rem;
-        border-radius: 0.6rem;
-        font-size: 0.92rem;
-        font-weight: 500;
-        color: var(--color-mist-200);
-      }
-      /* This scoped rule outranks Tailwind's utility layer, so make .hidden win here. */
-      .drawer-link.hidden {
-        display: none;
-      }
-      .drawer-link:hover {
-        background: var(--color-ink-800);
-        color: var(--color-ignite-400);
-      }
-      #app-drawer {
-        transform: translateX(-100%);
-        transition: transform 0.3s var(--ease-spring);
-      }
-      #app-drawer.open {
-        transform: translateX(0);
-      }
+      .portal-chip:hover { color: var(--color-ignite-400); border-color: var(--color-ignite-500); }
+      .portal-chip.active { background: var(--color-ignite-500); color: #fff; border-color: var(--color-ignite-500); }
+      #portal-nav::-webkit-scrollbar { display: none; }
     </style>
 
     <script>
       import { supabase, supabaseConfigured } from '../lib/supabase';
-      import { esc, fmtDateTime, clubFeatures, CLUB_COLS } from '../lib/app';
+      import { loadCtx, portalsFor, setActiveClub, esc } from '../lib/app';
 
-      // ------- offline banner -------
       const banner = document.getElementById('offline-banner');
       const syncOnline = () => banner?.classList.toggle('hidden', navigator.onLine);
       addEventListener('online', syncOnline);
       addEventListener('offline', syncOnline);
       syncOnline();
+      if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 
-      // ------- service worker -------
-      if ('serviceWorker' in navigator) {
-        addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
-      }
-
-      // ------- install prompt -------
-      let deferredPrompt: Event | null = null;
-      const hint = document.getElementById('install-hint');
-      const installBtn = document.getElementById('install-btn');
-      const drawerInstall = document.getElementById('drawer-install');
-      const dismissed = () => localStorage.getItem('ignyte-install-dismissed') === '1';
-      const standalone =
-        matchMedia('(display-mode: standalone)').matches ||
-        (navigator as unknown as { standalone?: boolean }).standalone === true;
-
-      addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        drawerInstall?.classList.remove('hidden');
-        if (!dismissed() && !standalone) hint?.classList.remove('hidden');
-      });
-      const doInstall = () => {
-        hint?.classList.add('hidden');
-        (deferredPrompt as unknown as { prompt: () => void } | null)?.prompt();
-      };
-      installBtn?.addEventListener('click', doInstall);
-      drawerInstall?.addEventListener('click', doInstall);
-      document.getElementById('install-dismiss')?.addEventListener('click', () => {
-        localStorage.setItem('ignyte-install-dismissed', '1');
-        hint?.classList.add('hidden');
-      });
-      const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
-      if (isIos && !standalone && !dismissed()) {
-        setTimeout(() => {
-          const body = hint?.querySelector('p.text-xs');
-          if (body) body.textContent = 'Tap the Share button in Safari, then "Add to Home Screen".';
-          installBtn?.classList.add('hidden');
-          hint?.classList.remove('hidden');
-        }, 2500);
-      }
-
-      // ------- drawer -------
-      const drawer = document.getElementById('app-drawer');
-      const backdrop = document.getElementById('drawer-backdrop');
-      const setDrawer = (open: boolean) => {
-        drawer?.classList.toggle('open', open);
-        backdrop?.classList.toggle('hidden', !open);
-      };
-      document.getElementById('drawer-btn')?.addEventListener('click', () => setDrawer(true));
-      document.getElementById('drawer-close')?.addEventListener('click', () => setDrawer(false));
-
-      // mobile site menu (works signed out — the app drawer needs a session)
-      const siteMenuBtn = document.getElementById('site-menu-btn');
-      const siteMenu = document.getElementById('site-menu');
-      siteMenuBtn?.addEventListener('click', () => {
-        const open = siteMenu?.classList.toggle('hidden') === false;
-        siteMenuBtn.setAttribute('aria-expanded', String(open));
-      });
-      siteMenu?.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => siteMenu.classList.add('hidden')));
-      backdrop?.addEventListener('click', () => setDrawer(false));
-
-      // ------- auth-aware chrome + notifications -------
-      if (document.getElementById('drawer-btn') && supabaseConfigured) {
+      const nav = document.getElementById('portal-nav');
+      if (nav && supabaseConfigured) {
         (async () => {
-          const { data } = await supabase.auth.getSession();
-          if (!data.session) {
-            document.getElementById('signin-link')?.classList.remove('hidden');
-            return;
-          }
-          const uid = data.session.user.id;
-          const sms = document.getElementById('site-menu-signin') as HTMLAnchorElement | null;
-          if (sms) {
-            sms.textContent = 'Open app';
-            sms.href = '/dashboard';
-          }
-
-          // background pumps: drain pending emails + auto-collect due invoices.
-          // Both edge functions self-rate-limit (2 min) and no-op when unset.
-          const pumpLast = Number(sessionStorage.getItem('icm-pump') ?? 0);
-          if (Date.now() - pumpLast > 5 * 60 * 1000) {
-            sessionStorage.setItem('icm-pump', String(Date.now()));
-            const pumpHeaders = {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${data.session.access_token}`,
-              apikey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-            };
-            for (const [fn, body] of [
-              ['send-emails', {}],
-              ['pay', { action: 'autocollect' }],
-            ] as const) {
-              fetch(`${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/${fn}`, {
-                method: 'POST',
-                headers: pumpHeaders,
-                body: JSON.stringify(body),
-              }).catch(() => {});
-            }
-          }
-
-          const [{ data: profile }, { data: mships }] = await Promise.all([
-            supabase.from('profiles').select('role, last_club_id').eq('id', uid).single(),
-            supabase
-              .from('club_members')
-              .select(`club_id, role, status, clubs(${CLUB_COLS})`)
-              .eq('profile_id', uid),
-          ]);
-          const isOwner = profile?.role === 'owner';
-          type M = { club_id: string; role: string; status: string; clubs: { name: string; status: string; plan: string; addons: string[] | null; accent_color: string | null } };
-          const usable = ((mships ?? []) as unknown as M[]).filter(
-            (m) => m.status === 'active' && m.clubs?.status === 'active'
-          );
-          const stored = localStorage.getItem('icm-active-club');
-          const active =
-            usable.find((m) => m.club_id === stored) ??
-            usable.find((m) => m.club_id === profile?.last_club_id) ??
-            (usable.length === 1 ? usable[0] : undefined);
-
-          // Owner "support key": a stored club they're NOT a member of means
-          // they're acting inside that club as its admin (View as admin).
-          let supportClub: { id: string; name: string; plan: string; addons: string[] | null; accent_color: string | null } | null = null;
-          if (isOwner && !active && stored) {
-            const { data: sc } = await supabase.from('clubs').select('id, name, plan, addons, accent_color').eq('id', stored).single();
-            supportClub = sc ?? null;
-            if (!sc) localStorage.removeItem('icm-active-club');
-          }
-
-          // role for nav: owner sees just Owner HQ unless they're inside a club
-          const role = isOwner
-            ? (supportClub ? 'admin' : (active?.role ?? 'owner'))
-            : (active?.role ?? (usable.length ? 'parent' : 'none'));
-
-          // club branding in chrome
-          const drawerClub = document.getElementById('drawer-club');
-          if (drawerClub && (active || supportClub)) drawerClub.textContent = supportClub ? supportClub.name : active!.clubs.name;
-          if (drawerClub && isOwner && !active && !supportClub) drawerClub.textContent = 'Owner HQ';
-          const accent = supportClub ? supportClub.accent_color : active?.clubs.accent_color;
-          const accentPlan = supportClub ? supportClub.plan : active?.clubs.plan;
-          if (accent && accentPlan !== 'free') {
-            const root = document.documentElement;
-            root.style.setProperty('--color-ignite-500', accent);
-            root.style.setProperty('--color-ignite-600', accent);
-            root.style.setProperty('--color-ignite-400', accent);
-          }
-
-          // Acting-as banner: always visible while the support key is in play.
-          if (supportClub) {
-            const { data: grants } = await supabase
-              .from('owner_support_grants')
-              .select('expires_at')
-              .eq('club_id', supportClub.id)
-              .gt('expires_at', new Date().toISOString())
-              .order('expires_at', { ascending: false })
-              .limit(1);
-            const exp = grants?.[0]?.expires_at;
-            const mins = exp ? Math.max(1, Math.round((new Date(exp).getTime() - Date.now()) / 60000)) : 0;
-            const bar = document.createElement('div');
-            bar.className = 'sticky top-16 z-30 bg-charge-400/15 border-b border-charge-400/40 text-charge-400 text-xs font-semibold py-1.5 px-4 flex items-center justify-center gap-3 flex-wrap';
-            bar.innerHTML = `<span>🔑 Acting as club admin — ${esc(supportClub.name)} · ${exp ? `${mins} min support window (changes are logged)` : 'read-only (no support window)'}</span>
-              <button id="support-exit" class="underline underline-offset-2">Exit to Owner HQ</button>`;
-            document.querySelector('main')?.before(bar);
-            document.getElementById('support-exit')?.addEventListener('click', () => {
-              localStorage.removeItem('icm-active-club');
-              location.href = '/owner';
-            });
-          }
-
-          // switcher (2+ clubs, or owner)
-          const switcher = document.getElementById('club-switcher');
-          const swList = document.getElementById('club-switcher-list');
-          if (switcher && swList && (usable.length > 1 || (isOwner && usable.length > 0))) {
-            switcher.classList.remove('hidden');
-            swList.innerHTML = usable
-              .map(
-                (m) => `
-              <button data-switch="${m.club_id}" class="drawer-link w-full text-left ${m.club_id === active?.club_id ? 'text-ignite-400' : ''}">
-                ${m.clubs.name} <span class="text-[0.65rem] text-mist-500">· ${m.role}</span>
-              </button>`
-              )
-              .join('');
-            swList.querySelectorAll<HTMLButtonElement>('[data-switch]').forEach((b) =>
-              b.addEventListener('click', async () => {
-                localStorage.setItem('icm-active-club', b.dataset.switch!);
-                await supabase.from('profiles').update({ last_club_id: b.dataset.switch }).eq('id', uid);
-                if ('caches' in window) {
-                  const keys = await caches.keys();
-                  await Promise.all(keys.filter((k) => k.startsWith('ignyte-data')).map((k) => caches.delete(k)));
-                }
-                location.href = '/dashboard';
-              })
-            );
-          }
-
-          document.getElementById('drawer-btn')?.classList.remove('hidden');
-          document.getElementById('openapp-link')?.classList.remove('hidden');
-          document.getElementById('notif-btn')?.classList.remove('hidden');
-          // What this club's package includes — the nav shows only these.
-          const capClub = supportClub
-            ? { plan: supportClub.plan, addons: supportClub.addons ?? [] }
-            : active
-              ? { plan: active.clubs.plan, addons: active.clubs.addons ?? [] }
-              : { plan: 'comped', addons: [] };
-          const feats = clubFeatures(capClub);
-          drawer?.querySelectorAll<HTMLElement>('[data-roles]').forEach((el) => {
-            const roles = (el.dataset.roles ?? '').split(',');
-            const feature = el.dataset.feature ?? '';
-            // owners keep everything; otherwise gate by role AND the club's package
-            const roleOk = roles.includes(role) || (isOwner && roles.includes('owner'));
-            const featOk = !feature || isOwner || feats.has(feature);
-            if (roleOk && featOk) el.classList.remove('hidden');
-          });
-
-          document.getElementById('signout-btn')?.addEventListener('click', async () => {
+          const ctx = await loadCtx();
+          if (!ctx) return;
+          const club = ctx.club;
+          const clubEl = document.getElementById('chrome-club');
+          if (clubEl) clubEl.textContent = club ? club.name : ctx.profile.is_platform_owner ? 'Ignyte HQ' : '';
+          const portals = portalsFor(club, ctx.profile.is_platform_owner);
+          const here = location.pathname.replace(/\/$/, '') || '/';
+          nav.innerHTML = portals
+            .map((p) => `<a href="${p.href}" class="portal-chip ${here === p.href || (p.href !== '/hq' && here.startsWith(p.href + '/')) ? 'active' : ''}">${p.label}</a>`)
+            .join('');
+          const so = document.getElementById('signout-btn');
+          so?.classList.remove('hidden');
+          so?.addEventListener('click', async () => {
             await supabase.auth.signOut();
+            localStorage.removeItem('ignyte-club');
             location.href = '/';
           });
-
-          // Notifications
-          const dot = document.getElementById('notif-dot');
-          const panel = document.getElementById('notif-panel');
-          const list = document.getElementById('notif-list');
-          const loadNotifs = async () => {
-            const { data: notifs } = await supabase
-              .from('notifications')
-              .select('*')
-              .order('created_at', { ascending: false })
-              .limit(20);
-            if (!notifs) return;
-            dot?.classList.toggle('hidden', !notifs.some((n) => !n.read));
+          if (ctx.clubs.length > 1) {
+            const sw = document.getElementById('switcher');
+            const list = document.getElementById('switcher-list');
+            sw?.classList.remove('hidden');
             if (list) {
-              list.innerHTML = notifs.length
-                ? notifs
-                    .map(
-                      (n) => `
-                  <div class="px-3 py-2.5 rounded-lg hover:bg-ink-800 ${n.read ? 'opacity-60' : ''}">
-                    <p class="text-sm font-semibold">${esc(n.title)}</p>
-                    <p class="text-xs text-mist-400 mt-0.5">${esc(n.body)}</p>
-                    <p class="text-[0.65rem] text-mist-500 mt-1">${fmtDateTime(n.created_at)}</p>
-                  </div>`
-                    )
-                    .join('')
-                : '<p class="px-3 py-4 text-sm text-mist-500">Nothing yet.</p>';
+              list.innerHTML = ctx.clubs
+                .map((c) => `<button data-club="${c.id}" class="portal-chip ${c.id === club?.id ? 'active' : ''}">${esc(c.name)}</button>`)
+                .join('');
+              list.querySelectorAll<HTMLButtonElement>('[data-club]').forEach((b) =>
+                b.addEventListener('click', () => {
+                  setActiveClub(b.dataset.club!);
+                  location.href = '/dashboard';
+                })
+              );
             }
-          };
-          loadNotifs();
-
-          document.getElementById('notif-btn')?.addEventListener('click', async () => {
-            const opening = panel?.classList.contains('hidden');
-            panel?.classList.toggle('hidden');
-            if (opening) {
-              await loadNotifs();
-              await supabase.from('notifications').update({ read: true }).eq('read', false);
-              dot?.classList.add('hidden');
-            }
-          });
-          document.addEventListener('click', (e) => {
-            if (
-              !panel?.classList.contains('hidden') &&
-              !panel?.contains(e.target as Node) &&
-              !document.getElementById('notif-btn')?.contains(e.target as Node)
-            )
-              panel?.classList.add('hidden');
-          });
+          }
         })();
       }
     </script>

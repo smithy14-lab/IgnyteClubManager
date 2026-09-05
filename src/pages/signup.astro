@@ -4,141 +4,73 @@ import IgnyteMark from '../components/IgnyteMark.astro';
 ---
 
 <AppLayout title="Create account" chrome={false}>
-  <section class="min-h-[85dvh] flex items-center justify-center py-8">
-    <div class="w-full max-w-sm surface-card p-7 animate-rise">
-      <div class="flex items-center gap-2.5 mb-2">
-        <IgnyteMark size={30} />
-        <h1 class="text-xl">Create account</h1>
-        <p class="text-xs text-mist-500 mt-1">Running a club? <a href="/start" class="text-ignite-400">Start your club here</a> instead.</p>
-      </div>
-      <p id="joining-note" class="hidden text-xs text-ignite-400 mb-4"></p>
-
-      <form id="signup-form" class="flex flex-col gap-4 mt-4">
-        <div>
-          <label class="form-label">I am a…</label>
-          <div class="grid grid-cols-2 gap-2" id="role-picker">
-            <button type="button" data-role="parent" class="role-btn is-active">Parent / guardian</button>
-            <button type="button" data-role="athlete" class="role-btn">Athlete 18+</button>
-          </div>
-          <p id="role-hint" class="mt-1.5 text-xs text-mist-500">
-            Parents book for their athletes. Under-18s are added to a parent account — they don't get logins.
-            Coaches join by club invitation.
-          </p>
-        </div>
-        <div>
-          <label class="form-label" for="full_name">Full name</label>
-          <input class="field" id="full_name" name="full_name" autocomplete="name" required />
-        </div>
-        <div id="dob-wrap" class="hidden">
-          <label class="form-label" for="dob">Date of birth</label>
-          <input class="field" id="dob" name="dob" type="date" />
-        </div>
-        <div>
-          <label class="form-label" for="email">Email</label>
-          <input class="field" id="email" name="email" type="email" autocomplete="email" required />
-        </div>
-        <div>
-          <label class="form-label" for="phone">Phone (optional)</label>
-          <input class="field" id="phone" name="phone" type="tel" autocomplete="tel" />
-        </div>
-        <div>
-          <label class="form-label" for="password">Password</label>
-          <input class="field" id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
-        </div>
-        <div id="code-wrap">
-          <label class="form-label" for="join_code">Club code (optional)</label>
-          <input class="field uppercase" id="join_code" maxlength="6" placeholder="e.g. 7F2KQ9" />
-          <p class="mt-1 text-xs text-mist-500">With a code you join the club instantly; without one you can request to join after signing up.</p>
-        </div>
-        <button type="submit" class="btn btn-primary mt-1">Create account</button>
-      </form>
-      <p class="mt-5 text-sm text-mist-400">
-        <a href="/login" class="hover:text-ignite-400">Already have an account? Sign in</a>
-      </p>
+  <div class="max-w-sm mx-auto mt-10">
+    <div class="text-center mb-6">
+      <IgnyteMark size={52} />
+      <h1 class="text-2xl mt-3">Create your account</h1>
+      <p class="text-sm text-mist-400 mt-1">One login for parents, athletes, coaches and clubs.</p>
     </div>
-  </section>
-
-  <style>
-    .role-btn {
-      border: 1px solid var(--color-ink-600);
-      border-radius: var(--radius-md);
-      padding: 0.5rem 0.25rem;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--color-mist-300);
-      cursor: pointer;
-    }
-    .role-btn.is-active {
-      border-color: var(--color-ignite-500);
-      color: var(--color-ignite-400);
-      background: color-mix(in srgb, var(--color-ignite-500) 10%, transparent);
-    }
-  </style>
+    <form id="signup" class="surface-card p-6 flex flex-col gap-4">
+      <div>
+        <label class="form-label" for="name">Your name</label>
+        <input class="field" id="name" autocomplete="name" required maxlength="60" />
+      </div>
+      <div>
+        <label class="form-label" for="email">Email</label>
+        <input class="field" id="email" type="email" autocomplete="email" required />
+      </div>
+      <div>
+        <label class="form-label" for="phone">Mobile <span class="text-mist-500 font-normal">(so your coach can reach you)</span></label>
+        <input class="field" id="phone" type="tel" autocomplete="tel" />
+      </div>
+      <div>
+        <label class="form-label" for="pw">Password</label>
+        <input class="field" id="pw" type="password" autocomplete="new-password" minlength="8" required />
+      </div>
+      <div>
+        <label class="form-label" for="code">Club code <span class="text-mist-500 font-normal">(optional — your club gives you this)</span></label>
+        <input class="field uppercase" id="code" maxlength="6" placeholder="e.g. STORM1" />
+        <p class="text-xs text-mist-500 mt-1">Coaches and club staff: skip this — your club has already added your email.</p>
+      </div>
+      <button class="btn btn-primary" type="submit" id="go">Create account</button>
+    </form>
+    <div id="confirm" class="hidden surface-card p-6 text-center mt-4">
+      <p class="text-3xl">📧</p>
+      <h2 class="text-lg mt-2">Check your email</h2>
+      <p class="text-sm text-mist-400 mt-2">Tap the link we sent you, then <a href="/" class="text-ignite-400">sign in</a>. Your club code will be applied automatically.</p>
+    </div>
+    <p class="text-sm text-center text-mist-400 mt-5">Already have an account? <a href="/" class="text-ignite-400 font-semibold">Sign in</a></p>
+  </div>
 
   <script>
     import { supabase } from '../lib/supabase';
     import { toast, errMsg } from '../lib/app';
 
-    let role = 'parent';
-    const params = new URLSearchParams(location.search);
-    const clubSlug = params.get('club');
-    const presetCode = params.get('code');
-    const next = params.get('next');
+    const q = new URLSearchParams(location.search);
+    const codeEl = document.getElementById('code') as HTMLInputElement;
+    if (q.get('code')) codeEl.value = q.get('code')!.toUpperCase();
 
-    if (presetCode) (document.getElementById('join_code') as HTMLInputElement).value = presetCode;
-    if (clubSlug) {
-      supabase.rpc('get_club_public', { p_slug: clubSlug }).then(({ data }) => {
-        const note = document.getElementById('joining-note')!;
-        if (data) {
-          note.textContent = `You're joining ${(data as { name: string }).name}`;
-          note.classList.remove('hidden');
-        }
-      });
-    }
-
-    document.querySelectorAll<HTMLButtonElement>('.role-btn').forEach((btn) =>
-      btn.addEventListener('click', () => {
-        role = btn.dataset.role ?? 'parent';
-        document.querySelectorAll('.role-btn').forEach((b) => b.classList.remove('is-active'));
-        btn.classList.add('is-active');
-        document.getElementById('dob-wrap')?.classList.toggle('hidden', role !== 'athlete');
-        (document.getElementById('dob') as HTMLInputElement).required = role === 'athlete';
-      })
-    );
-
-    const form = document.getElementById('signup-form') as HTMLFormElement;
-    form.addEventListener('submit', async (e) => {
+    (document.getElementById('signup') as HTMLFormElement).addEventListener('submit', async (e) => {
       e.preventDefault();
-      const fd = new FormData(form);
-      if (role === 'athlete') {
-        const dob = new Date(String(fd.get('dob')) + 'T00:00:00');
-        const cutoff = new Date();
-        cutoff.setFullYear(cutoff.getFullYear() - 18);
-        if (dob > cutoff) {
-          return toast('Under-18 athletes are added by a parent — register a parent account instead.', 'err');
-        }
-      }
-      const code = (document.getElementById('join_code') as HTMLInputElement).value.trim();
-      const { error, data } = await supabase.auth.signUp({
-        email: String(fd.get('email')),
-        password: String(fd.get('password')),
-        options: {
-          data: {
-            full_name: String(fd.get('full_name')),
-            phone: String(fd.get('phone') ?? ''),
-            role,
-            dob: role === 'athlete' ? String(fd.get('dob')) : null,
-            join_code: code || null,
-            join_slug: !code && clubSlug ? clubSlug : null,
-          },
-        },
+      const btn = document.getElementById('go') as HTMLButtonElement;
+      btn.disabled = true;
+      const full_name = (document.getElementById('name') as HTMLInputElement).value.trim();
+      const email = (document.getElementById('email') as HTMLInputElement).value.trim();
+      const phone = (document.getElementById('phone') as HTMLInputElement).value.trim();
+      const password = (document.getElementById('pw') as HTMLInputElement).value;
+      const code = codeEl.value.trim().toUpperCase();
+      const { data, error } = await supabase.auth.signUp({
+        email, password,
+        options: { data: { full_name, phone }, emailRedirectTo: location.origin + '/dashboard' },
       });
+      btn.disabled = false;
       if (error) return toast(errMsg(error), 'err');
-      if (!data.session) {
-        toast('Account created — check your email to confirm, then sign in.');
-        setTimeout(() => (location.href = '/login' + (next ? `?next=${encodeURIComponent(next)}` : '')), 2500);
+      if (code) localStorage.setItem('ignyte-pending-code', code);
+      if (data.session) {
+        location.href = '/dashboard';
       } else {
-        location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
+        document.getElementById('signup')!.classList.add('hidden');
+        document.getElementById('confirm')!.classList.remove('hidden');
       }
     });
   </script>

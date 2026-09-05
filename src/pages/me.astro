@@ -1,0 +1,93 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Me">
+  <p class="eyebrow">Athlete</p>
+  <div class="flex flex-wrap items-center justify-between gap-2 mt-1 mb-4">
+    <h1 class="text-2xl" id="title">Your journey</h1>
+    <a id="book" href="/book?back=/me" class="btn btn-primary btn-sm hidden">＋ Book a lesson</a>
+  </div>
+  <div id="content"><p class="text-sm text-mist-500">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requireAuth, esc, toast, errMsg, money, fmtWhen, journeyHtml, type Ctx, type JourneyData, type Athlete } from '../lib/app';
+
+    const content = document.getElementById('content')!;
+    let ctx: Ctx;
+
+    async function render() {
+      const club = ctx.club!;
+      const { data: rows } = await supabase.from('athletes').select('*').eq('club_id', club.id).eq('profile_id', ctx.profile.id).limit(1);
+      const me = (rows ?? [])[0] as Athlete | undefined;
+      if (!me) {
+        content.innerHTML = `
+          <div class="surface-card p-5">
+            <p class="text-sm">You're in <b>${esc(club.name)}</b> but there's no athlete record linked to your login yet.</p>
+            <p class="text-xs text-mist-400 mt-1">If a parent set you up, ask them or the club to link your email. Or set yourself up now:</p>
+            <form id="self" class="grid sm:grid-cols-2 gap-2.5 mt-4">
+              <div><label class="form-label">Name</label><input class="field" name="name" required value="${esc(ctx.profile.full_name)}" /></div>
+              <div><label class="form-label">Date of birth</label><input class="field" name="dob" type="date" /></div>
+              <div class="sm:col-span-2"><label class="form-label">Medical / allergies</label><input class="field" name="medical" /></div>
+              <div class="sm:col-span-2"><label class="form-label">Goal</label><input class="field" name="goals" maxlength="200" placeholder="e.g. Full by comp season" /></div>
+              <button class="btn btn-primary sm:col-span-2" type="submit">I train here</button>
+            </form>
+          </div>`;
+        document.getElementById('self')!.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const f = new FormData(e.currentTarget as HTMLFormElement);
+          const { error } = await supabase.rpc('save_athlete', { p_club: club.id, p_id: null, p_name: String(f.get('name')).trim(), p_dob: f.get('dob') || null, p_medical: f.get('medical'), p_goals: f.get('goals'), p_self: true });
+          if (error) return toast(errMsg(error), 'err');
+          location.reload();
+        });
+        return;
+      }
+      document.getElementById('book')!.classList.remove('hidden');
+      (document.getElementById('book') as HTMLAnchorElement).href = `/book?athlete=${me.id}&back=/me`;
+      const { data: j, error } = await supabase.rpc('athlete_journey', { p_athlete: me.id });
+      if (error) return toast(errMsg(error), 'err');
+      const jd = j as JourneyData;
+      const upcoming = jd.lessons.filter((l) => l.status === 'booked' && new Date(l.starts_at).getTime() > Date.now()).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+      const owed = jd.lessons.filter((l) => !l.paid && (l.status === 'completed' || l.status === 'no_show'));
+      content.innerHTML = `
+        <section class="surface-card p-4 mb-4">
+          <h2 class="font-semibold mb-2">Upcoming</h2>
+          ${upcoming.length ? `<div class="flex flex-col gap-1.5">${upcoming.map((l) => `
+            <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5 flex flex-wrap items-center gap-2 text-sm">
+              <span class="flex-1">With <b>${esc(l.coach_name)}</b><span class="block text-xs text-mist-400">${fmtWhen(l.starts_at)} · ${money(l.price_pence, club.currency)}</span></span>
+              <button class="btn btn-ghost btn-sm" data-cancel="${l.lesson_id}">Cancel</button>
+            </div>`).join('')}</div>` : `<p class="text-sm text-mist-500">Nothing booked. <a class="text-ignite-400" href="/book?athlete=${me.id}&back=/me">Book a lesson →</a></p>`}
+        </section>
+        ${owed.length ? `<section class="surface-card p-4 mb-4 border-charge-400/40"><h2 class="font-semibold text-charge-400">💷 To pay · ${money(owed.reduce((s, l) => s + l.price_pence, 0), club.currency)}</h2><p class="text-xs text-mist-400">Pay ${esc(club.name)} directly — they'll mark it paid.</p></section>` : ''}
+        <section class="surface-card p-4">
+          <form class="flex gap-2 mb-3" id="goal"><input class="field flex-1" placeholder="Your goal, e.g. Standing tuck by March" value="${esc(me.goals ?? '')}" maxlength="200" /><button class="btn btn-ghost btn-sm">Set goal</button></form>
+          ${journeyHtml(jd)}
+        </section>`;
+      content.querySelectorAll<HTMLButtonElement>('[data-cancel]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm(`Cancel this lesson? Less than ${club.cancel_hours}h notice may still be charged.`)) return;
+          const { error: ce } = await supabase.rpc('cancel_lesson', { p_lesson: b.dataset.cancel });
+          if (ce) return toast(errMsg(ce), 'err');
+          toast('Cancelled');
+          render();
+        })
+      );
+      document.getElementById('goal')!.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const goal = (e.currentTarget as HTMLFormElement).querySelector('input')!.value;
+        const { error: ge } = await supabase.rpc('save_athlete', { p_club: club.id, p_id: me.id, p_name: me.name, p_dob: me.dob, p_medical: me.medical_notes, p_notes: me.notes, p_goals: goal });
+        if (ge) return toast(errMsg(ge), 'err');
+        toast('Goal set 🎯');
+        render();
+      });
+    }
+
+    (async () => {
+      ctx = await requireAuth(['athlete', 'parent']);
+      await render();
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>

@@ -1,78 +1,56 @@
 ---
 import AppLayout from '../layouts/AppLayout.astro';
 import IgnyteMark from '../components/IgnyteMark.astro';
-
-const features = [
-  ['🌐', 'A real club website — free', 'Pages you write yourself, an enquiry form that lands in your inbox, and a timetable that updates itself — because the site runs on your live club data. Upgrade to your own domain and club mailbox.'],
-  ['🤸', 'Classes, trials & waiting lists', 'Weekly classes with age bands and capacity, free or paid taster sessions with automatic follow-ups, and waiting lists that promote the next family (siblings first) the moment a space opens.'],
-  ['⚡', 'Privates too, when you run them', 'An optional 1-2-1 module: live slot calendars by coach and discipline, one-offs or weekly — bolt it on only if your club offers privates.'],
-  ['🔥', 'Skill journeys that sell themselves', 'Every session updates a visual progression: levels light up, badges land, and families get a "🎉 skill achieved!" the moment it happens. Progress parents can see is progress parents keep paying for.'],
-  ['💷', 'Payments & memberships — 0% fees', 'Invoices, card & Direct Debit checkout on your own Stripe, memberships billed on your chosen day, late fees and chasing handled for you. Every penny goes to the club — no % cut, ever.'],
-  ['🛍️', 'A club shop, built in — free', 'Kit, uniforms and merch with sizes and stock. Orders invoice themselves when payments are on, land on your website, and families collect at training.'],
-  ['🧾', 'The whole club office', 'Registers with medical flags on the coach’s phone, credits & makeup tokens, broadcasts, coach-pay and money Excel exports, migration from your old system — installable on any phone.'],
-];
-
-const steps = [
-  ['1', 'Claim your free website', 'Start your club, write your pages, share your link — your timetable and coaches are already on it.'],
-  ['2', 'Open your classes', 'Weekly classes for the squads with trials and waiting lists — coaches attach themselves with their rates.'],
-  ['3', 'Families book, pay & watch', 'Enrolments, trials and lessons booked in seconds, paid online at 0% — and every skill journey lights up as they learn.'],
-];
 ---
 
-<AppLayout title="The club platform for cheer & dance">
-  <section class="min-h-[72dvh] flex flex-col items-center justify-center text-center pt-8 animate-rise">
-    <IgnyteMark size={84} />
-    <h1 class="mt-6 text-headline max-w-3xl">
-      Your club's website, classes,<br /><span class="ignite-text">lessons &amp; payments — one platform.</span>
-    </h1>
-    <p class="mt-5 max-w-xl text-mist-300 text-lg">
-      Ignyte runs the whole cheer &amp; dance club: a free club website, group classes with
-      trials and waiting lists, events, a club shop, memberships and 0%-fee payments —
-      wrapped around a skill progression families fall in love with. Privates? There's a
-      module for that too.
-    </p>
-    <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-      <a href="/start" class="btn btn-primary">Start your club — free</a>
-      <a href="/login" class="btn btn-ghost">Member sign in</a>
+<AppLayout title="Sign in" chrome={false}>
+  <div class="max-w-sm mx-auto mt-10">
+    <div class="text-center mb-6">
+      <IgnyteMark size={52} />
+      <h1 class="text-2xl mt-3">Ignyte <span class="ignite-text">1-2-1</span></h1>
+      <p class="text-sm text-mist-400 mt-1">Private lessons, booked in seconds.</p>
     </div>
-    <p class="mt-8 text-xs text-mist-500">Installable from the browser · Works offline · Built for UK clubs</p>
-  </section>
-
-  <section class="max-w-4xl mx-auto pb-6">
-    <p class="eyebrow justify-center flex">Why clubs switch</p>
-    <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {features.map(([emoji, title, body]) => (
-        <div class="surface-card p-5 text-left">
-          <p class="text-2xl">{emoji}</p>
-          <h2 class="mt-2 text-base font-semibold">{title}</h2>
-          <p class="mt-1 text-sm text-mist-400">{body}</p>
-        </div>
-      ))}
-    </div>
-  </section>
-
-  <section class="max-w-3xl mx-auto py-12">
-    <p class="eyebrow justify-center flex">How it works</p>
-    <div class="mt-4 grid gap-4 sm:grid-cols-3">
-      {steps.map(([n, title, body]) => (
-        <div class="text-center">
-          <div class="mx-auto w-10 h-10 rounded-full flex items-center justify-center font-display font-bold text-white"
-            style="background: linear-gradient(135deg, var(--color-charge-400), var(--color-ignite-500), var(--color-spark-500))">{n}</div>
-          <h3 class="mt-3 font-semibold text-sm">{title}</h3>
-          <p class="mt-1 text-xs text-mist-400">{body}</p>
-        </div>
-      ))}
-    </div>
-  </section>
-
-  <section class="text-center pb-16">
-    <div class="surface-card max-w-xl mx-auto p-8" style="box-shadow: var(--shadow-glow)">
-      <h2 class="text-xl">Ready to ignite your club?</h2>
-      <p class="mt-2 text-sm text-mist-400">Free for your first club, set up in minutes — upgrade only when you want your own branding.</p>
-      <div class="mt-5 flex flex-wrap justify-center gap-3">
-        <a href="/start" class="btn btn-primary">Start your club</a>
-        <a href="/about" class="btn btn-ghost">Our story</a>
+    <form id="login" class="surface-card p-6 flex flex-col gap-4">
+      <div>
+        <label class="form-label" for="email">Email</label>
+        <input class="field" id="email" type="email" autocomplete="email" required />
       </div>
-    </div>
-  </section>
+      <div>
+        <label class="form-label" for="pw">Password</label>
+        <input class="field" id="pw" type="password" autocomplete="current-password" required />
+      </div>
+      <button class="btn btn-primary" type="submit" id="go">Sign in</button>
+      <button class="text-xs text-mist-500 hover:text-ignite-400" type="button" id="forgot">Forgotten your password?</button>
+    </form>
+    <p class="text-sm text-center text-mist-400 mt-5">New here? <a href="/signup" class="text-ignite-400 font-semibold">Create an account</a></p>
+  </div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { toast, errMsg } from '../lib/app';
+
+    const next = new URLSearchParams(location.search).get('next') || '/dashboard';
+    const email = document.getElementById('email') as HTMLInputElement;
+    const pw = document.getElementById('pw') as HTMLInputElement;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) location.href = next;
+    });
+
+    (document.getElementById('login') as HTMLFormElement).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('go') as HTMLButtonElement;
+      btn.disabled = true;
+      const { error } = await supabase.auth.signInWithPassword({ email: email.value.trim(), password: pw.value });
+      btn.disabled = false;
+      if (error) return toast(errMsg(error), 'err');
+      location.href = next;
+    });
+
+    document.getElementById('forgot')!.addEventListener('click', async () => {
+      if (!email.value) return toast('Type your email first, then tap this again.', 'err');
+      const { error } = await supabase.auth.resetPasswordForEmail(email.value.trim(), { redirectTo: location.origin + '/dashboard' });
+      toast(error ? errMsg(error) : 'Check your email for a reset link.', error ? 'err' : 'ok');
+    });
+  </script>
 </AppLayout>

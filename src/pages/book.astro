@@ -2,506 +2,105 @@
 import AppLayout from '../layouts/AppLayout.astro';
 ---
 
-<AppLayout title="Book a 1-2-1">
-  <div class="flex items-center gap-2 mt-1 mb-1">
-    <a href="/bookings" class="btn btn-ghost btn-sm">← My 1-2-1s</a>
-    <p class="eyebrow">Private 1-2-1</p>
+<AppLayout title="Book a lesson">
+  <div class="max-w-lg mx-auto">
+    <div class="flex items-center justify-between gap-2 mb-4">
+      <h1 class="text-2xl">Book a 1-2-1</h1>
+      <a id="back" href="/family" class="btn btn-ghost btn-sm">← Back</a>
+    </div>
+    <div id="content"><p class="text-sm text-mist-500">Loading…</p></div>
   </div>
-  <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
-    <h1 class="text-2xl">Book a lesson</h1>
-    <div id="view-toggle"></div>
-  </div>
-
-  <div class="surface-card p-4 mb-6 grid gap-3 grid-cols-2 sm:grid-cols-5">
-    <div>
-      <label class="form-label" for="f-from">From</label>
-      <input class="field" type="date" id="f-from" />
-    </div>
-    <div>
-      <label class="form-label" for="f-to">To</label>
-      <input class="field" type="date" id="f-to" />
-    </div>
-    <div>
-      <label class="form-label" for="f-loc">Location</label>
-      <select class="field" id="f-loc"><option value="">All locations</option></select>
-    </div>
-    <div>
-      <label class="form-label" for="f-coach">Coach</label>
-      <select class="field" id="f-coach"><option value="">Any coach</option></select>
-    </div>
-    <div>
-      <label class="form-label" for="f-time">Time of day</label>
-      <select class="field" id="f-time">
-        <option value="">Any time</option>
-        <option value="morning">Morning (before 12)</option>
-        <option value="afternoon">Afternoon (12–5)</option>
-        <option value="evening">Evening (after 5)</option>
-      </select>
-    </div>
-  </div>
-
-  <div id="cal-host" class="hidden"></div>
-  <div id="board"><p class="text-mist-500 text-sm">Loading timetable…</p></div>
-
-  <!-- booking / waitlist panel -->
-  <div id="panel-backdrop" class="hidden fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
-    <div class="surface-card w-full sm:max-w-md p-6 rounded-b-none sm:rounded-b-[var(--radius-xl)] max-h-[90dvh] overflow-y-auto">
-      <div class="flex items-start justify-between gap-3">
-        <h2 id="panel-title" class="text-lg">Book lesson</h2>
-        <button id="panel-close" class="btn btn-ghost btn-sm">Close</button>
-      </div>
-      <p id="panel-sub" class="text-sm text-mist-400 mt-1"></p>
-      <div class="mt-5 flex flex-col gap-4">
-        <div>
-          <label class="form-label" for="p-athlete">Athlete</label>
-          <select class="field" id="p-athlete"></select>
-        </div>
-        <div id="p-disc-wrap">
-          <label class="form-label">What's this lesson for?</label>
-          <div class="grid grid-cols-3 gap-2">
-            <button type="button" data-disc="tumble" class="disc-btn is-active">Tumble</button>
-            <button type="button" data-disc="dance" class="disc-btn">Dance</button>
-            <button type="button" data-disc="both" class="disc-btn">Both</button>
-          </div>
-          <p class="mt-1.5 text-xs text-mist-500">Coaches are filtered to those who cover it.</p>
-        </div>
-        <div>
-          <label class="form-label" for="p-coach">Coach</label>
-          <select class="field" id="p-coach"></select>
-        </div>
-        <div id="p-freq-wrap">
-          <label class="form-label">How often?</label>
-          <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="p-oneoff" class="btn btn-ghost btn-sm is-active">One-off</button>
-            <button type="button" id="p-weekly" class="btn btn-ghost btn-sm">Weekly until cancelled</button>
-          </div>
-          <p id="p-weekly-hint" class="hidden mt-1.5 text-xs text-mist-500">
-            Books this time every week for as long as the club runs the slot. Cancel any time.
-          </p>
-        </div>
-        <p id="p-credits" class="hidden text-xs text-ignite-400 font-semibold"></p>
-        <p id="p-policy" class="text-xs text-mist-500"></p>
-        <button id="p-confirm" class="btn btn-primary">Confirm booking</button>
-      </div>
-    </div>
-  </div>
-
-  <style>
-    #p-oneoff.is-active, #p-weekly.is-active, .disc-btn.is-active {
-      border-color: var(--color-ignite-500) !important;
-      color: var(--color-ignite-400);
-      background: color-mix(in srgb, var(--color-ignite-500) 10%, transparent);
-    }
-    .disc-btn {
-      border: 1px solid var(--color-ink-600);
-      border-radius: var(--radius-md);
-      padding: 0.45rem 0.25rem;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--color-mist-300);
-      cursor: pointer;
-    }
-  </style>
 
   <script>
     import { supabase } from '../lib/supabase';
-    import { requireAuth, myAthletes, fmtDate, fmtTime, esc, toast, errMsg, type ActiveClub } from '../lib/app';
-    import { renderMonthCalendar, renderViewToggle, isoDate, type CalChip } from '../lib/calendar';
+    import { requireAuth, myAthletes, schedule, startOfDay, addDays, esc, toast, errMsg, money, fmtTime, fmtDay, dayKey, groupByDay, type Ctx, type ScheduleRow, type Athlete } from '../lib/app';
 
-    type Coach = {
-      id: string; name: string; busy: boolean;
-      disciplines: string[] | null; levels: string | null; rate: number | null;
-    };
-    type Slot = {
-      id: string; slot_date: string; start_time: string; end_time: string;
-      capacity: number; series_id: string | null; notes: string | null;
-      location_id: string | null; location: string | null;
-      booked: number; waiting: number; coaches: Coach[];
-    };
+    const content = document.getElementById('content')!;
+    const q = new URLSearchParams(location.search);
+    const back = q.get('back') || '/family';
+    (document.getElementById('back') as HTMLAnchorElement).href = back;
 
-    const board = document.getElementById('board')!;
-    const fFrom = document.getElementById('f-from') as HTMLInputElement;
-    const fTo = document.getElementById('f-to') as HTMLInputElement;
-    const fLoc = document.getElementById('f-loc') as HTMLSelectElement;
-    const fCoach = document.getElementById('f-coach') as HTMLSelectElement;
-    const fTime = document.getElementById('f-time') as HTMLSelectElement;
+    let ctx: Ctx;
+    let athletes: Athlete[] = [];
+    let rows: ScheduleRow[] = [];
+    let athleteId = q.get('athlete') || '';
+    let coachId = '';
+    let day = '';
 
-    function coachLabel(c: Coach): string {
-      const bits = [];
-      if (c.disciplines?.length) {
-        bits.push(c.disciplines.map((d) => (d === 'tumble' ? 'tumble' : 'dance')).join(' + '));
-      }
-      if (c.rate != null) bits.push(`£${c.rate}`);
-      return bits.length ? `${c.name} (${bits.join(' · ')})` : c.name;
-    }
-
-    let club: ActiveClub | null = null;
-    let slots: Slot[] = [];
-    let athletes: Awaited<ReturnType<typeof myAthletes>> = [];
-    let policyText = '';
-    let creditBalance = 0;
-    let mode: 'book' | 'waitlist' = 'book';
-    let activeSlot: Slot | null = null;
-    let weekly = false;
-    let discipline: 'tumble' | 'dance' | 'both' = 'tumble';
-    let view: 'tiles' | 'calendar' =
-      (localStorage.getItem('icm-book-view') as 'tiles' | 'calendar') ?? 'tiles';
-    const calCursor = new Date();
-    let calSlots: Slot[] = [];
-
-    function coachCovers(c: Coach, d: string): boolean {
-      if (!c.disciplines || !c.disciplines.length) return true;
-      if (d === 'both') return c.disciplines.includes('tumble') && c.disciplines.includes('dance');
-      return c.disciplines.includes(d);
-    }
-
-    const today = new Date();
-    fFrom.value = today.toISOString().slice(0, 10);
-    const to = new Date(today);
-    to.setDate(to.getDate() + 14);
-    fTo.value = to.toISOString().slice(0, 10);
-
-    async function load() {
-      const { data, error } = await supabase.rpc('get_slot_board', {
-        p_club: club!.id,
-        p_from: fFrom.value,
-        p_to: fTo.value,
-      });
-      if (error) return toast(errMsg(error), 'err');
-      slots = (data ?? []) as Slot[];
-
-      // Coach + location filter options from what's actually on offer
-      const coachMap = new Map<string, string>();
-      slots.forEach((s) => s.coaches.forEach((c) => coachMap.set(c.id, c.name)));
-      const current = fCoach.value;
-      fCoach.innerHTML =
-        '<option value="">Any coach</option>' +
-        [...coachMap.entries()]
-          .sort((a, b) => a[1].localeCompare(b[1]))
-          .map(([id, name]) => `<option value="${id}">${esc(name)}</option>`)
-          .join('');
-      fCoach.value = current;
-
-      const locMap = new Map<string, string>();
-      slots.forEach((s) => {
-        if (s.location_id && s.location) locMap.set(s.location_id, s.location);
-      });
-      const currentLoc = fLoc.value;
-      fLoc.innerHTML =
-        '<option value="">All locations</option>' +
-        [...locMap.entries()]
-          .sort((a, b) => a[1].localeCompare(b[1]))
-          .map(([id, name]) => `<option value="${id}">${esc(name)}</option>`)
-          .join('');
-      fLoc.value = currentLoc;
-      render();
-    }
-
-    function inTimeband(t: string): boolean {
-      if (!fTime.value) return true;
-      const h = parseInt(t.slice(0, 2), 10);
-      if (fTime.value === 'morning') return h < 12;
-      if (fTime.value === 'afternoon') return h >= 12 && h < 17;
-      return h >= 17;
-    }
-
-    function passesFilters(s: Slot): boolean {
-      if (!inTimeband(s.start_time)) return false;
-      if (fLoc.value && s.location_id !== fLoc.value) return false;
-      if (fCoach.value && !s.coaches.some((c) => c.id === fCoach.value)) return false;
-      if (new Date(s.slot_date + 'T' + s.end_time) < new Date()) return false;
-      return true;
-    }
-
-    // ---------- calendar view ----------
-    function renderToggle() {
-      const host = document.getElementById('view-toggle')!;
-      host.innerHTML = renderViewToggle(view);
-      host.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) =>
-        b.addEventListener('click', () => {
-          view = b.dataset.view as 'tiles' | 'calendar';
-          localStorage.setItem('icm-book-view', view);
-          renderToggle();
-          syncView();
-        })
-      );
-    }
-
-    function syncView() {
-      document.getElementById('board')!.classList.toggle('hidden', view === 'calendar');
-      document.getElementById('cal-host')!.classList.toggle('hidden', view !== 'calendar');
-      if (view === 'calendar') renderCalendar();
-      else render();
-    }
-
-    async function renderCalendar() {
-      const host = document.getElementById('cal-host')!;
-      const y = calCursor.getFullYear();
-      const m = calCursor.getMonth();
-      const { data, error } = await supabase.rpc('get_slot_board', {
-        p_club: club!.id,
-        p_from: `${y}-${String(m + 1).padStart(2, '0')}-01`,
-        p_to: isoDate(new Date(y, m + 1, 0)),
-      });
-      if (error) return toast(errMsg(error), 'err');
-      calSlots = (data ?? []) as Slot[];
-
-      const chips = new Map<string, CalChip[]>();
-      for (const s of calSlots) {
-        if (!passesFilters(s)) continue;
-        const free = s.capacity - s.booked;
-        const freeCoaches = s.coaches.filter((c) => !c.busy);
-        const bookable = free > 0 && freeCoaches.length > 0;
-        const spaces = Math.min(free, freeCoaches.length);
-        (chips.get(s.slot_date) ?? chips.set(s.slot_date, []).get(s.slot_date)!).push({
-          id: s.id,
-          label: `${fmtTime(s.start_time)}${bookable ? ` · ${spaces}` : ' full'}`,
-          tone: bookable ? 'ok' : 'danger',
-          title: `${s.location ?? ''} — ${s.coaches.map((c) => c.name).join(', ') || 'no coaches yet'}`,
-        });
-      }
-
-      host.innerHTML = renderMonthCalendar(y, m, chips);
-      host.querySelector('[data-cal-prev]')?.addEventListener('click', () => {
-        calCursor.setMonth(calCursor.getMonth() - 1);
-        renderCalendar();
-      });
-      host.querySelector('[data-cal-next]')?.addEventListener('click', () => {
-        calCursor.setMonth(calCursor.getMonth() + 1);
-        renderCalendar();
-      });
-      host.querySelectorAll<HTMLButtonElement>('[data-chip]').forEach((b) =>
-        b.addEventListener('click', () => {
-          const slot = calSlots.find((s) => s.id === b.dataset.chip);
-          if (!slot) return;
-          slots = calSlots;
-          const free = slot.capacity - slot.booked;
-          const freeCoaches = slot.coaches.filter((c) => !c.busy);
-          openPanel(slot.id, free > 0 && freeCoaches.length > 0 ? 'book' : 'waitlist');
-        })
-      );
+    function open(): ScheduleRow[] {
+      return rows.filter((r) => !r.lesson_id && r.slot_status === 'open' && new Date(r.starts_at).getTime() > Date.now() && (!coachId || r.coach_id === coachId));
     }
 
     function render() {
-      const filtered = slots.filter(passesFilters);
-
-      if (!filtered.length) {
-        board.innerHTML =
-          '<div class="surface-card p-8 text-center text-mist-500 text-sm">No slots match — try widening the dates or clearing filters.</div>';
-        return;
-      }
-
-      const byDate = new Map<string, Slot[]>();
-      filtered.forEach((s) => {
-        (byDate.get(s.slot_date) ?? byDate.set(s.slot_date, []).get(s.slot_date)!).push(s);
-      });
-
-      board.innerHTML = [...byDate.entries()]
-        .map(
-          ([date, daySlots]) => `
-        <h2 class="text-sm font-display font-semibold uppercase tracking-widest text-mist-400 mt-6 mb-2">${fmtDate(date)}</h2>
-        <div class="grid gap-3 sm:grid-cols-2">
-          ${daySlots
-            .map((s) => {
-              const free = s.capacity - s.booked;
-              const freeCoaches = s.coaches.filter((c) => !c.busy);
-              const bookable = free > 0 && freeCoaches.length > 0;
-              return `
-            <div class="surface-card p-4">
-              <div class="flex items-center justify-between gap-2">
-                <p class="font-display font-semibold">${fmtTime(s.start_time)}–${fmtTime(s.end_time)}</p>
-                <span class="pill ${bookable ? 'pill-success' : 'pill-danger'}">
-                  ${bookable ? `${Math.min(free, freeCoaches.length)} space${Math.min(free, freeCoaches.length) === 1 ? '' : 's'}` : 'Full'}
-                </span>
-              </div>
-              <div class="mt-2 flex flex-wrap gap-1.5">
-                ${s.location ? `<span class="pill">${esc(s.location)}</span>` : ''}
-                ${s.series_id ? '<span class="pill pill-accent">Runs weekly</span>' : ''}
-              </div>
-              <p class="text-xs text-mist-400 mt-2">
-                ${
-                  s.coaches.length
-                    ? 'Coaches: ' + s.coaches.map((c) => `<span class="${c.busy ? 'line-through opacity-50' : ''}">${esc(c.name)}</span>`).join(', ')
-                    : 'No coaches yet'
-                }
-              </p>
-              ${s.notes ? `<p class="text-xs text-mist-500 mt-1">${esc(s.notes)}</p>` : ''}
-              <div class="mt-3 flex gap-2">
-                ${
-                  bookable
-                    ? `<button class="btn btn-primary btn-sm" data-book="${s.id}">Book</button>`
-                    : `<button class="btn btn-ghost btn-sm" data-wait="${s.id}">Join waiting list${s.waiting ? ` (${s.waiting} waiting)` : ''}</button>`
-                }
-              </div>
-            </div>`;
-            })
-            .join('')}
-        </div>`
-        )
-        .join('');
-
-      board.querySelectorAll<HTMLButtonElement>('[data-book]').forEach((b) =>
-        b.addEventListener('click', () => openPanel(b.dataset.book!, 'book'))
-      );
-      board.querySelectorAll<HTMLButtonElement>('[data-wait]').forEach((b) =>
-        b.addEventListener('click', () => openPanel(b.dataset.wait!, 'waitlist'))
+      const club = ctx.club!;
+      const coaches = [...new Map(rows.filter((r) => !r.lesson_id).map((r) => [r.coach_id, r.coach_name])).entries()];
+      const avail = open();
+      const days = groupByDay(avail);
+      if (day && !days.some(([k]) => k === day)) day = '';
+      const times = day ? avail.filter((r) => dayKey(r.starts_at) === day) : [];
+      content.innerHTML = `
+        <section class="surface-card p-4 mb-3">
+          <p class="text-xs font-semibold uppercase tracking-widest text-mist-500 mb-2">1 · Who's the lesson for?</p>
+          <div class="flex flex-wrap gap-1.5">
+            ${athletes.map((a) => `<button class="portal-chip ${a.id === athleteId ? 'active' : ''}" data-ath="${a.id}">${esc(a.name)}</button>`).join('')}
+            <a class="portal-chip" href="/family#athletes">＋ Add athlete</a>
+          </div>
+        </section>
+        ${coaches.length > 1 ? `<section class="surface-card p-4 mb-3">
+          <p class="text-xs font-semibold uppercase tracking-widest text-mist-500 mb-2">2 · Coach</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button class="portal-chip ${!coachId ? 'active' : ''}" data-coach="">Any coach</button>
+            ${coaches.map(([id, name]) => `<button class="portal-chip ${id === coachId ? 'active' : ''}" data-coach="${id}">${esc(name)}</button>`).join('')}
+          </div>
+        </section>` : ''}
+        <section class="surface-card p-4 mb-3">
+          <p class="text-xs font-semibold uppercase tracking-widest text-mist-500 mb-2">${coaches.length > 1 ? '3' : '2'} · Pick a day</p>
+          ${days.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            ${days.map(([k, list]) => `<button class="rounded-lg border px-3 py-2 text-left text-sm ${k === day ? 'border-ignite-500 bg-ignite-500/10' : 'border-ink-700 bg-ink-900 hover:border-ink-500'}" data-day="${k}">
+              <b class="block">${fmtDay(list[0].starts_at)}</b><span class="text-xs text-mist-500">${list.length} time${list.length === 1 ? '' : 's'}</span></button>`).join('')}
+          </div>` : `<p class="text-sm text-mist-500">No open times in the next 6 weeks${coachId ? ' with this coach' : ''}. Ask the club to add availability.</p>`}
+        </section>
+        ${day ? `<section class="surface-card p-4">
+          <p class="text-xs font-semibold uppercase tracking-widest text-mist-500 mb-2">${coaches.length > 1 ? '4' : '3'} · Pick a time · ${fmtDay(times[0].starts_at)}</p>
+          <div class="flex flex-col gap-1.5">
+            ${times.map((r) => `<button class="flex items-center gap-3 rounded-lg border border-ink-700 bg-ink-900 hover:border-ignite-500 px-3 py-2.5 text-left text-sm" data-slot="${r.slot_id}">
+              <b class="font-display tabular-nums">${fmtTime(r.starts_at)}</b><span class="flex-1">${esc(r.coach_name)}</span><span class="text-xs text-mist-500">${r.minutes} min · ${money(r.price_pence, club.currency)}</span></button>`).join('')}
+          </div>
+        </section>` : ''}`;
+      content.querySelectorAll<HTMLButtonElement>('[data-ath]').forEach((b) => b.addEventListener('click', () => { athleteId = b.dataset.ath!; render(); }));
+      content.querySelectorAll<HTMLButtonElement>('[data-coach]').forEach((b) => b.addEventListener('click', () => { coachId = b.dataset.coach!; render(); }));
+      content.querySelectorAll<HTMLButtonElement>('[data-day]').forEach((b) => b.addEventListener('click', () => { day = b.dataset.day!; render(); }));
+      content.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!athleteId) return toast('Choose who the lesson is for first.', 'err');
+          const r = rows.find((x) => x.slot_id === b.dataset.slot)!;
+          const a = athletes.find((x) => x.id === athleteId)!;
+          if (!confirm(`Book ${a.name} with ${r.coach_name} on ${fmtDay(r.starts_at)} at ${fmtTime(r.starts_at)} (${money(r.price_pence, club.currency)})?`)) return;
+          const { error } = await supabase.rpc('book_slot', { p_slot: r.slot_id, p_athlete: athleteId });
+          if (error) return toast(errMsg(error), 'err');
+          toast('Booked! 🎉');
+          location.href = back;
+        })
       );
     }
-
-    // ---------- booking panel ----------
-    const backdrop = document.getElementById('panel-backdrop')!;
-    const pAthlete = document.getElementById('p-athlete') as HTMLSelectElement;
-    const pCoach = document.getElementById('p-coach') as HTMLSelectElement;
-    const pConfirm = document.getElementById('p-confirm') as HTMLButtonElement;
-
-    function openPanel(slotId: string, m: 'book' | 'waitlist') {
-      activeSlot = slots.find((s) => s.id === slotId) ?? null;
-      if (!activeSlot) return;
-      mode = m;
-      weekly = false;
-      document.getElementById('p-oneoff')?.classList.add('is-active');
-      document.getElementById('p-weekly')?.classList.remove('is-active');
-      document.getElementById('p-weekly-hint')?.classList.add('hidden');
-
-      if (!athletes.length) {
-        toast('Add an athlete first — go to the Athletes page.', 'err');
-        return;
-      }
-
-      document.getElementById('panel-title')!.textContent =
-        m === 'book' ? 'Book lesson' : 'Join waiting list';
-      document.getElementById('panel-sub')!.textContent =
-        `${fmtDate(activeSlot.slot_date)} · ${fmtTime(activeSlot.start_time)}–${fmtTime(activeSlot.end_time)}` +
-        (activeSlot.location ? ` · ${activeSlot.location}` : '');
-      pAthlete.innerHTML = athletes
-        .map((a) => `<option value="${a.id}">${esc(a.name)}</option>`)
-        .join('');
-
-      discipline = 'tumble';
-      document.querySelectorAll('.disc-btn').forEach((b) =>
-        b.classList.toggle('is-active', (b as HTMLElement).dataset.disc === discipline)
-      );
-      document.getElementById('p-disc-wrap')!.classList.toggle('hidden', m === 'waitlist');
-      updateCoachOptions();
-
-      const freq = document.getElementById('p-freq-wrap')!;
-      freq.classList.toggle('hidden', m === 'waitlist' || !activeSlot.series_id);
-      document.getElementById('p-policy')!.textContent = m === 'book' ? policyText : '';
-      const creditsEl = document.getElementById('p-credits')!;
-      creditsEl.classList.toggle('hidden', m !== 'book' || creditBalance <= 0);
-      creditsEl.textContent = `💳 You have ${creditBalance} lesson credit${creditBalance === 1 ? '' : 's'} — one-off bookings use one automatically.`;
-      pConfirm.textContent = m === 'book' ? 'Confirm booking' : 'Join waiting list';
-      backdrop.classList.remove('hidden');
-    }
-
-    function updateCoachOptions() {
-      if (!activeSlot) return;
-      const options =
-        mode === 'book'
-          ? activeSlot.coaches.filter((c) => !c.busy && coachCovers(c, discipline))
-          : activeSlot.coaches;
-      pCoach.innerHTML =
-        (mode === 'waitlist' ? '<option value="">Any coach</option>' : '') +
-        options.map((c) => `<option value="${c.id}">${esc(coachLabel(c))}</option>`).join('');
-      if (mode === 'book' && !options.length) {
-        pCoach.innerHTML = '<option value="">No free coach covers this</option>';
-      }
-      pConfirm.disabled = mode === 'book' && !options.length;
-    }
-
-    document.querySelectorAll<HTMLButtonElement>('.disc-btn').forEach((b) =>
-      b.addEventListener('click', () => {
-        discipline = (b.dataset.disc as typeof discipline) ?? 'tumble';
-        document.querySelectorAll('.disc-btn').forEach((x) => x.classList.remove('is-active'));
-        b.classList.add('is-active');
-        updateCoachOptions();
-      })
-    );
-
-    document.getElementById('panel-close')?.addEventListener('click', () => backdrop.classList.add('hidden'));
-    backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) backdrop.classList.add('hidden');
-    });
-    document.getElementById('p-oneoff')?.addEventListener('click', (e) => {
-      weekly = false;
-      (e.currentTarget as HTMLElement).classList.add('is-active');
-      document.getElementById('p-weekly')?.classList.remove('is-active');
-      document.getElementById('p-weekly-hint')?.classList.add('hidden');
-    });
-    document.getElementById('p-weekly')?.addEventListener('click', (e) => {
-      weekly = true;
-      (e.currentTarget as HTMLElement).classList.add('is-active');
-      document.getElementById('p-oneoff')?.classList.remove('is-active');
-      document.getElementById('p-weekly-hint')?.classList.remove('hidden');
-    });
-
-    pConfirm.addEventListener('click', async () => {
-      if (!activeSlot) return;
-      pConfirm.disabled = true;
-      try {
-        if (mode === 'book') {
-          const { data, error } = await supabase.rpc('book_slot', {
-            p_slot_id: activeSlot.id,
-            p_athlete_id: pAthlete.value,
-            p_coach_id: pCoach.value,
-            p_weekly: weekly,
-            p_discipline: discipline,
-          });
-          if (error) throw error;
-          const skipped = (data as { skipped?: number })?.skipped ?? 0;
-          toast(
-            weekly
-              ? `Weekly lesson booked!${skipped ? ` (${skipped} week${skipped === 1 ? '' : 's'} unavailable and skipped)` : ''}`
-              : 'Lesson booked!'
-          );
-        } else {
-          const { error } = await supabase.rpc('join_waitlist', {
-            p_slot_id: activeSlot.id,
-            p_athlete_id: pAthlete.value,
-            p_coach_id: pCoach.value || null,
-          });
-          if (error) throw error;
-          toast("You're on the waiting list — we'll offer you the space if it frees up.");
-        }
-        backdrop.classList.add('hidden');
-        await load();
-        if (view === 'calendar') await renderCalendar();
-      } catch (e) {
-        toast(errMsg(e), 'err');
-      } finally {
-        pConfirm.disabled = false;
-      }
-    });
-
-    [fFrom, fTo].forEach((el) => el.addEventListener('change', load));
-    [fLoc, fCoach, fTime].forEach((el) =>
-      el.addEventListener('change', () => {
-        render();
-        if (view === 'calendar') renderCalendar();
-      })
-    );
 
     (async () => {
-      const ctx = await requireAuth('any', 'privates');
-      club = ctx.club!;
-      athletes = (await myAthletes(club.id)).filter((a) => a.enrolled);
-      const { data: settings } = await supabase
-        .from('club_settings')
-        .select('cancellation_policy')
-        .eq('club_id', club.id)
-        .single();
-      policyText = settings?.cancellation_policy ?? '';
-      const { data: ledger } = await supabase
-        .from('credit_ledger')
-        .select('delta')
-        .eq('club_id', club.id)
-        .eq('profile_id', ctx.profile.id);
-      creditBalance = (ledger ?? []).reduce((s, r) => s + r.delta, 0);
-      renderToggle();
-      await load();
-      syncView();
+      ctx = await requireAuth(['parent', 'athlete', 'owner', 'admin', 'coach']);
+      athletes = await myAthletes(ctx.club!.id);
+      if (!athletes.length) {
+        content.innerHTML = `<div class="surface-card p-5 text-sm"><p>Add an athlete first — a child, or yourself if you train.</p><a class="btn btn-primary btn-sm mt-3" href="/family#athletes">Add athlete</a></div>`;
+        return;
+      }
+      if (!athletes.some((a) => a.id === athleteId)) athleteId = athletes.length === 1 ? athletes[0].id : '';
+      rows = await schedule(ctx.club!.id, new Date(), addDays(startOfDay(), 43));
+      render();
     })().catch((e) => {
       if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
     });
   </script>
+  <style>
+    .portal-chip { display: inline-flex; align-items: center; padding: 0.4rem 0.8rem; border-radius: 999px; border: 1px solid var(--color-ink-600); color: var(--color-mist-300); font-size: 0.85rem; font-weight: 500; }
+    .portal-chip:hover { border-color: var(--color-ignite-500); color: var(--color-ignite-400); }
+    .portal-chip.active { background: var(--color-ignite-500); border-color: var(--color-ignite-500); color: #fff; }
+  </style>
 </AppLayout>

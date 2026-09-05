@@ -73,13 +73,13 @@ jobs:
           echo "Deployed to $URL"
           fail=0
           sleep 5
-          for path in / /login /signup /dashboard /book /site.webmanifest /sw.js; do
+          for path in / /signup /dashboard /book /club /coach /family /me /hq /site.webmanifest /sw.js; do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$URL$path" || true)
             echo "$path → HTTP $code"
             [ "$code" = "200" ] || fail=1
           done
           {
-            echo "### ✅ Ignyte Club Manager is live"
+            echo "### ✅ Ignyte 1-2-1 is live"
             echo ""
             echo "🔗 **$URL**"
             echo ""

@@ -1,6 +1,5 @@
 {
-  // Cloudflare Workers config: static Astro site + a tiny worker that
-  // rewrites /c/{slug} to the club portal page.
+  // Cloudflare Workers config: static Astro site served by a tiny worker.
   "name": "ignyte-club-manager",
   "account_id": "8d447df562d0c3b0ecd30f5b863ce617",
   "compatibility_date": "2026-07-01",

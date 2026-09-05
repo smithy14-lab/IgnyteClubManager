@@ -1,284 +1,205 @@
 import { supabase, supabaseConfigured } from './supabase';
 
-export type Role = 'parent' | 'athlete' | 'coach' | 'admin' | 'owner';
-export type ClubRole = 'parent' | 'athlete' | 'coach' | 'admin';
+export type Role = 'owner' | 'admin' | 'coach' | 'parent' | 'athlete';
 
 export interface Profile {
   id: string;
   full_name: string;
   email: string;
   phone: string | null;
-  role: Role;
-  last_club_id: string | null;
+  is_platform_owner: boolean;
 }
 
-export interface Membership {
-  club_id: string;
-  role: ClubRole;
-  status: 'active' | 'pending' | 'removed';
-  clubs: {
-    id: string;
-    name: string;
-    slug: string;
-    status: string;
-    plan: string;
-    addons: string[] | null;
-    logo_path: string | null;
-    accent_color: string | null;
-  };
-}
-
-export interface ActiveClub {
+export interface Club {
   id: string;
   name: string;
   slug: string;
+  join_code: string | null;
+  venue: string | null;
+  timezone: string;
+  lesson_minutes: number;
+  lesson_price_pence: number;
+  currency: string;
+  cancel_hours: number;
   status: string;
-  plan: string;
-  addons: string[];
-  role: ClubRole | 'owner';
-  accent_color: string | null;
-  logo_path: string | null;
+  roles: Role[];
 }
 
-/** The columns every club query needs so capability gating works. */
-export const CLUB_COLS = 'id, name, slug, status, plan, addons, logo_path, accent_color';
-
-/**
- * A club's package = exactly what the owner enabled. The whole app shows only
- * these. Model: club/comped plans get everything; any à-la-carte club's surface
- * IS its `addons` list (nothing baseline); a plan with no addons falls back to
- * the free/small baseline. Some features are derived (payments rides with any
- * billable module; progress/enrolments ride with lessons/classes).
- */
-export type Feature =
-  | 'privates' | 'classes' | 'memberships' | 'shop' | 'events'
-  | 'website' | 'websitepro' | 'payments' | 'progress' | 'enrolments' | 'forms';
-
-const ALL_FEATURES: Feature[] = [
-  'privates', 'classes', 'memberships', 'shop', 'events',
-  'website', 'websitepro', 'payments', 'progress', 'enrolments', 'forms',
-];
-
-export function clubFeatures(club: { plan: string; addons?: string[] | null }): Set<string> {
-  if (club.plan === 'club' || club.plan === 'comped') return new Set<string>(ALL_FEATURES);
-  const addons = club.addons ?? [];
-  const s = new Set<string>(['forms']); // forms (waivers) are always available
-  // à-la-carte club → its surface is EXACTLY its addons (fully modular: a club
-  // can have just 'classes', or just 'enrolments', or just 'privates', etc.);
-  // a plan with no addons falls back to the free/small baseline.
-  const base = addons.length ? [...addons] : ['classes', 'enrolments', 'shop', 'events', 'website'];
-  if (club.plan === 'small' && !addons.includes('privates')) base.push('privates');
-  base.forEach((a) => s.add(a));
-  // derived-only conveniences (never force one primary module from another)
-  if (s.has('privates') || s.has('memberships') || s.has('classes') || s.has('enrolments')) s.add('payments');
-  if (s.has('privates') || s.has('classes') || s.has('enrolments')) s.add('progress');
-  if (s.has('websitepro')) s.add('website');
-  return s;
-}
-
-export function hasFeature(club: { plan: string; addons?: string[] | null }, key: Feature): boolean {
-  return clubFeatures(club).has(key);
-}
-
-export interface AuthCtx {
+export interface Ctx {
   profile: Profile;
-  memberships: Membership[];
-  club: ActiveClub | null;
+  clubs: Club[];
+  /** The club this page is working in (null when the user has none yet). */
+  club: Club | null;
+}
+
+export interface ScheduleRow {
+  slot_id: string;
+  starts_at: string;
+  minutes: number;
+  price_pence: number;
+  slot_status: 'open' | 'booked' | 'cancelled';
+  coach_id: string;
+  coach_name: string;
+  lesson_id: string | null;
+  lesson_status: string | null;
+  paid: boolean | null;
+  notes: string | null;
+  homework: string | null;
+  worked_on: string[] | null;
+  athlete_id: string | null;
+  athlete_name: string | null;
+  athlete_age: number | null;
+  medical: string | null;
+  goals: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  mine: boolean;
 }
 
 export interface Athlete {
   id: string;
+  club_id: string;
+  name: string;
+  dob: string | null;
   parent_id: string | null;
   profile_id: string | null;
-  name: string;
-  dob: string;
-  notes: string | null;
   medical_notes: string | null;
-  media_consent: boolean;
+  notes: string | null;
+  goals: string | null;
+  active: boolean;
 }
 
-const CLUB_KEY = 'icm-active-club';
+const CLUB_KEY = 'ignyte-club';
 
-export function storedClubId(): string | null {
-  return localStorage.getItem(CLUB_KEY);
+/** Which portals a set of roles unlocks. */
+export const PORTALS: { key: string; label: string; href: string; roles: Role[] }[] = [
+  { key: 'club', label: '🏛️ Club', href: '/club', roles: ['owner', 'admin'] },
+  { key: 'coach', label: '📣 Coach', href: '/coach', roles: ['coach'] },
+  { key: 'family', label: '👨‍👧 Family', href: '/family', roles: ['parent'] },
+  { key: 'me', label: '🔥 Me', href: '/me', roles: ['athlete'] },
+];
+
+export function portalsFor(club: Club | null, isPlatformOwner: boolean) {
+  const list = PORTALS.filter((p) => club && p.roles.some((r) => club.roles.includes(r)));
+  return isPlatformOwner ? [{ key: 'hq', label: '👑 Ignyte HQ', href: '/hq', roles: [] as Role[] }, ...list] : list;
 }
 
-export async function setActiveClub(clubId: string): Promise<void> {
-  localStorage.setItem(CLUB_KEY, clubId);
-  const { data } = await supabase.auth.getSession();
-  if (data.session) {
-    await supabase.from('profiles').update({ last_club_id: clubId }).eq('id', data.session.user.id);
+/** One round-trip: profile + clubs (+ merges any pending invites). */
+export async function loadCtx(): Promise<Ctx | null> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) return null;
+  const { data, error } = await supabase.rpc('my_context');
+  if (error || !data) return null;
+  const raw = data as { profile: Profile; clubs: Club[] };
+  const clubs = raw.clubs ?? [];
+  const urlClub = new URLSearchParams(location.search).get('club');
+  const stored = localStorage.getItem(CLUB_KEY);
+  let club = clubs.find((c) => c.id === urlClub) ?? clubs.find((c) => c.id === stored) ?? clubs[0] ?? null;
+  // Ignyte owner stepping into any club (they hold every role there).
+  const wanted = urlClub ?? (club ? null : stored);
+  if (!club && raw.profile.is_platform_owner && wanted) {
+    const { data: c } = await supabase.from('clubs').select('*').eq('id', wanted).single();
+    if (c) club = { ...(c as Club), roles: ['owner', 'admin', 'coach', 'parent', 'athlete'] };
+  } else if (raw.profile.is_platform_owner && urlClub && club && club.id === urlClub) {
+    club = { ...club, roles: ['owner', 'admin', 'coach', 'parent', 'athlete'] };
   }
-  // Purge cached club data so nothing bleeds across the switch.
-  if ('caches' in window) {
-    const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k.startsWith('ignyte-data')).map((k) => caches.delete(k)));
-  }
+  if (club) localStorage.setItem(CLUB_KEY, club.id);
+  return { profile: raw.profile, clubs, club };
 }
 
-export function applyClubBranding(club: ActiveClub | null): void {
-  if (club?.accent_color && club.plan !== 'free') {
-    const root = document.documentElement;
-    root.style.setProperty('--color-ignite-500', club.accent_color);
-    root.style.setProperty('--color-ignite-600', club.accent_color);
-    root.style.setProperty('--color-ignite-400', club.accent_color);
-  }
+export function setActiveClub(id: string) {
+  localStorage.setItem(CLUB_KEY, id);
 }
 
-/**
- * Require a signed-in user, resolve their memberships and the active club.
- * clubRoles: which roles-in-club may view this page ('any' = any member).
- * The platform owner passes every check; with ?club= they can enter any club.
- */
-export async function requireAuth(clubRoles?: ClubRole[] | 'any', feature?: Feature): Promise<AuthCtx> {
+/** Signed-in guard. With roles, the active club must grant one of them. */
+export async function requireAuth(roles?: Role[]): Promise<Ctx> {
   if (!supabaseConfigured) {
     document.body.innerHTML =
-      '<div style="padding:4rem 1.5rem;text-align:center;font-family:system-ui">' +
-      '<h1 style="font-size:1.4rem">Not configured</h1><p style="margin-top:1rem;color:#9090a8">Add Supabase env vars and rebuild.</p></div>';
+      '<div style="padding:4rem 1.5rem;text-align:center;font-family:system-ui"><h1>Not configured</h1><p>Add Supabase env vars and rebuild.</p></div>';
     throw new Error('Supabase not configured');
   }
-  const { data } = await supabase.auth.getSession();
-  if (!data.session) {
-    location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+  const ctx = await loadCtx();
+  if (!ctx) {
+    const { data } = await supabase.auth.getSession();
+    if (data.session) await supabase.auth.signOut();
+    location.href = '/?next=' + encodeURIComponent(location.pathname + location.search);
     throw new Error('redirecting');
   }
-  const uid = data.session.user.id;
-  const [{ data: profile }, { data: memberships }] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', uid).single(),
-    supabase
-      .from('club_members')
-      .select(`club_id, role, status, clubs(${CLUB_COLS})`)
-      .eq('profile_id', uid),
-  ]);
-  if (!profile) {
-    await supabase.auth.signOut();
-    location.href = '/login';
-    throw new Error('redirecting');
-  }
-
-  const all = (memberships ?? []) as unknown as Membership[];
-  const usable = all.filter((m) => m.status === 'active' && m.clubs?.status === 'active');
-  const isOwner = profile.role === 'owner';
-
-  // Resolve the active club: URL ?club= → stored → last → sole → null
-  let club: ActiveClub | null = null;
-  const urlClub = new URLSearchParams(location.search).get('club');
-  const pick = (id: string | null): Membership | undefined =>
-    id ? usable.find((m) => m.club_id === id) : undefined;
-  const chosen =
-    pick(urlClub) ?? pick(storedClubId()) ?? pick(profile.last_club_id) ?? (usable.length === 1 ? usable[0] : undefined);
-
-  if (chosen) {
-    club = {
-      id: chosen.club_id,
-      name: chosen.clubs.name,
-      slug: chosen.clubs.slug,
-      status: chosen.clubs.status,
-      plan: chosen.clubs.plan,
-      addons: chosen.clubs.addons ?? [],
-      role: chosen.role,
-      accent_color: chosen.clubs.accent_color,
-      logo_path: chosen.clubs.logo_path,
-    };
-  } else if (isOwner) {
-    // Owner acting inside a club they're not a member of (support access).
-    // The "key" is ?club= on entry, then localStorage so it survives navigation.
-    const supportId = urlClub ?? storedClubId();
-    if (supportId) {
-      const { data: c } = await supabase.from('clubs').select('*').eq('id', supportId).single();
-      if (c) {
-        club = { id: c.id, name: c.name, slug: c.slug, status: c.status, plan: c.plan, addons: c.addons ?? [], role: 'owner', accent_color: c.accent_color, logo_path: c.logo_path };
-      } else {
-        localStorage.removeItem(CLUB_KEY);
-      }
-    }
-  }
-
-  if (club) localStorage.setItem(CLUB_KEY, club.id);
-  applyClubBranding(club);
-
-  if (clubRoles) {
-    if (!club) {
-      if (isOwner) {
-        // owner without a club context heads to their console
-        if (!location.pathname.startsWith('/owner')) {
-          location.href = '/owner';
-          throw new Error('redirecting');
-        }
-      } else {
-        location.href = '/clubs';
-        throw new Error('redirecting');
-      }
-    } else if (clubRoles !== 'any' && club.role !== 'owner' && !clubRoles.includes(club.role as ClubRole)) {
+  if (roles) {
+    if (!ctx.club || !roles.some((r) => ctx.club!.roles.includes(r))) {
       location.href = '/dashboard';
       throw new Error('redirecting');
     }
   }
-
-  // Feature gate: a page for a module the club's package doesn't include is
-  // off-limits even by direct URL. Owners bypass (they can see everything).
-  if (feature && club && club.role !== 'owner' && !hasFeature(club, feature)) {
-    location.href = '/dashboard';
-    throw new Error('redirecting');
-  }
-
-  return { profile: profile as Profile, memberships: all, club };
+  return ctx;
 }
 
-/** Guard for the owner console. */
-export async function requireOwner(): Promise<AuthCtx> {
+export async function requirePlatformOwner(): Promise<Ctx> {
   const ctx = await requireAuth();
-  if (ctx.profile.role !== 'owner') {
+  if (!ctx.profile.is_platform_owner) {
     location.href = '/dashboard';
     throw new Error('redirecting');
   }
   return ctx;
 }
 
-/** Athletes the current user can book for, with enrolment state for a club. */
-export async function myAthletes(clubId?: string): Promise<(Athlete & { enrolled: boolean })[]> {
+export async function schedule(clubId: string, from: Date, to: Date): Promise<ScheduleRow[]> {
+  const { data, error } = await supabase.rpc('club_schedule', { p_club: clubId, p_from: from.toISOString(), p_to: to.toISOString() });
+  if (error) throw error;
+  return (data ?? []) as ScheduleRow[];
+}
+
+/** Athletes the signed-in user looks after (children + themselves) in a club. */
+export async function myAthletes(clubId: string): Promise<Athlete[]> {
   const { data: session } = await supabase.auth.getSession();
   const uid = session.session?.user.id;
   if (!uid) return [];
   const { data } = await supabase
     .from('athletes')
     .select('*')
+    .eq('club_id', clubId)
     .or(`parent_id.eq.${uid},profile_id.eq.${uid}`)
     .order('name');
-  const athletes = (data ?? []) as Athlete[];
-  if (!clubId || !athletes.length) return athletes.map((a) => ({ ...a, enrolled: true }));
-  const { data: enr } = await supabase
-    .from('athlete_enrolments')
-    .select('athlete_id')
-    .eq('club_id', clubId)
-    .in('athlete_id', athletes.map((a) => a.id));
-  const set = new Set((enr ?? []).map((e) => e.athlete_id));
-  return athletes.map((a) => ({ ...a, enrolled: set.has(a.id) }));
+  return (data ?? []) as Athlete[];
 }
 
-export function fmtDate(iso: string): string {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  });
+// ---------- formatting ----------
+export function money(pence: number, currency = 'GBP'): string {
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency, minimumFractionDigits: pence % 100 ? 2 : 0 }).format(pence / 100);
 }
-
-export function fmtTime(t: string): string {
-  return t.slice(0, 5);
+export function fmtWhen(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
-
-export function fmtDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+export function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
-
-export function ageFromDob(dob: string): number {
+export function fmtDay(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
+}
+export function fmtDate(isoDate: string): string {
+  return new Date(isoDate + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+/** Local calendar day (yyyy-mm-dd) of a timestamp. */
+export function dayKey(iso: string | Date): string {
+  const d = typeof iso === 'string' ? new Date(iso) : iso;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+export function todayISO(): string {
+  return dayKey(new Date());
+}
+export function startOfDay(d = new Date()): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+export function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+export function ageFromDob(dob: string | null): number | null {
+  if (!dob) return null;
   const d = new Date(dob + 'T00:00:00');
   const now = new Date();
   let age = now.getFullYear() - d.getFullYear();
@@ -286,12 +207,18 @@ export function ageFromDob(dob: string): number {
   if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
   return age;
 }
+export function groupByDay<T extends { starts_at: string }>(rows: T[]): [string, T[]][] {
+  const map = new Map<string, T[]>();
+  for (const r of rows) {
+    const k = dayKey(r.starts_at);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(r);
+  }
+  return [...map.entries()];
+}
 
 export function esc(s: unknown): string {
-  return String(s ?? '').replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
-  );
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
 export function toast(message: string, type: 'ok' | 'err' = 'ok'): void {
@@ -306,41 +233,107 @@ export function toast(message: string, type: 'ok' | 'err' = 'ok'): void {
   const el = document.createElement('div');
   el.setAttribute('role', 'status');
   el.style.cssText =
-    'padding:.65rem 1.1rem;border-radius:.75rem;font-size:.9rem;font-weight:500;width:100%;text-align:center;' +
-    'box-shadow:0 10px 30px -10px rgba(0,0,0,.8);border:1px solid;' +
-    (type === 'ok'
-      ? 'background:#16161f;color:#f4f4f9;border-color:#2a2a39'
-      : 'background:#2a1214;color:#ffb3b3;border-color:#5c2326');
+    'padding:.65rem 1.1rem;border-radius:.75rem;font-size:.9rem;font-weight:500;width:100%;text-align:center;box-shadow:0 10px 30px -10px rgba(0,0,0,.8);border:1px solid;' +
+    (type === 'ok' ? 'background:#16161f;color:#f4f4f9;border-color:#2a2a39' : 'background:#2a1214;color:#ffb3b3;border-color:#5c2326');
   el.textContent = message;
   host.appendChild(el);
-  setTimeout(() => el.remove(), 4200);
-}
-
-/** Today as YYYY-MM-DD in the user's own timezone (toISOString is UTC — wrong late at night in BST). */
-export function todayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  setTimeout(() => el.remove(), 4500);
 }
 
 export function errMsg(e: unknown): string {
-  const raw =
-    (e as { message?: string })?.message ?? (typeof e === 'string' ? e : 'Something went wrong');
+  const raw = (e as { message?: string })?.message ?? (typeof e === 'string' ? e : 'Something went wrong');
   const msg = raw.replace(/^.*?exception:? /i, '');
-  // Postgres/PostgREST internals nobody should read — translate the common ones.
   if (/^JWT expired/i.test(msg)) return 'Your session expired — refresh the page and sign in again.';
   if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) return "Can't reach the server — check your connection and try again.";
-  if (/duplicate key value/i.test(msg)) return 'That already exists — no need to add it twice.';
-  if (/violates foreign key/i.test(msg)) return "That can't be removed while other records still use it.";
-  if (/violates row-level security|permission denied/i.test(msg)) return "You don't have permission to do that in this club.";
-  if (/invalid input syntax/i.test(msg)) return 'One of the values doesn’t look right — check the form and try again.';
+  if (/duplicate key value/i.test(msg)) return 'That already exists.';
+  if (/violates row-level security|permission denied/i.test(msg)) return "You don't have permission to do that.";
+  if (/Invalid login credentials/i.test(msg)) return 'Wrong email or password.';
   return msg;
 }
 
-export const skillStatusLabels: Record<string, string> = {
-  not_started: 'Not started',
+export const STATUS_LABEL: Record<string, string> = {
+  booked: 'Booked',
+  completed: 'Attended',
+  no_show: 'No-show',
+  cancelled: 'Cancelled',
   working_on: 'Working on',
   achieved: 'Achieved',
   mastered: 'Mastered',
 };
 
-export const skillStatusOrder = ['not_started', 'working_on', 'achieved', 'mastered'];
+export function statusPill(status: string | null): string {
+  if (!status) return '';
+  const tone =
+    status === 'completed' || status === 'achieved' ? 'pill-success'
+    : status === 'mastered' ? 'pill-accent'
+    : status === 'no_show' || status === 'cancelled' ? 'pill-danger'
+    : status === 'working_on' ? 'pill-warn'
+    : '';
+  return `<span class="pill ${tone}">${STATUS_LABEL[status] ?? status}</span>`;
+}
+
+/** Shared "athlete journey" card: stats, progress, lesson history with coach notes. */
+export function journeyHtml(j: JourneyData, opts: { editable?: boolean } = {}): string {
+  const a = j.athlete;
+  const prog = j.progress ?? [];
+  const lessons = j.lessons ?? [];
+  return `
+    <div class="grid grid-cols-3 gap-2 text-center">
+      <div class="rounded-xl bg-ink-900 border border-ink-700 p-3"><p class="text-2xl font-display font-semibold text-ignite-400">${j.stats.completed}</p><p class="text-[0.65rem] uppercase tracking-widest text-mist-500">lessons</p></div>
+      <div class="rounded-xl bg-ink-900 border border-ink-700 p-3"><p class="text-2xl font-display font-semibold text-charge-400">${j.stats.working_on}</p><p class="text-[0.65rem] uppercase tracking-widest text-mist-500">working on</p></div>
+      <div class="rounded-xl bg-ink-900 border border-ink-700 p-3"><p class="text-2xl font-display font-semibold" style="color:#7ee2a8">${j.stats.achieved}</p><p class="text-[0.65rem] uppercase tracking-widest text-mist-500">achieved</p></div>
+    </div>
+    ${a.goals ? `<p class="text-sm mt-3"><span class="text-mist-500">🎯 Goal:</span> ${esc(a.goals)}</p>` : ''}
+    <h3 class="text-sm font-semibold mt-4 mb-1.5">Skills</h3>
+    <div class="flex flex-col gap-1.5" data-progress-list>
+      ${prog.map((p) => `
+        <div class="flex flex-wrap items-center gap-2 text-sm rounded-lg bg-ink-900 border border-ink-700 px-3 py-2">
+          <span class="flex-1 min-w-32">${esc(p.skill)}${p.note ? `<span class="block text-xs text-mist-500">${esc(p.note)}</span>` : ''}</span>
+          ${opts.editable ? `<select class="field !w-auto !py-1 !text-xs" data-skill-status="${esc(p.skill)}">
+              ${['working_on', 'achieved', 'mastered'].map((s) => `<option value="${s}" ${s === p.status ? 'selected' : ''}>${STATUS_LABEL[s]}</option>`).join('')}
+              <option value="">Remove</option></select>` : statusPill(p.status)}
+        </div>`).join('') || '<p class="text-sm text-mist-500">No skills tracked yet.</p>'}
+    </div>
+    ${opts.editable ? `<form class="flex gap-2 mt-2" data-add-skill>
+        <input class="field flex-1" placeholder="Add a skill, e.g. Back handspring" maxlength="60" required />
+        <button class="btn btn-ghost btn-sm" type="submit">Add</button></form>` : ''}
+    <h3 class="text-sm font-semibold mt-4 mb-1.5">Lesson history</h3>
+    <div class="flex flex-col gap-1.5">
+      ${lessons.filter((l) => l.status !== 'booked').slice(0, 20).map((l) => `
+        <div class="rounded-lg bg-ink-900 border border-ink-700 px-3 py-2 text-sm">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span>${fmtWhen(l.starts_at)} <span class="text-mist-500">· ${esc(l.coach_name)}</span></span>
+            ${statusPill(l.status)}
+          </div>
+          ${l.worked_on?.length ? `<p class="text-xs text-mist-400 mt-1">Worked on: ${l.worked_on.map(esc).join(', ')}</p>` : ''}
+          ${l.notes ? `<p class="text-xs mt-1">📝 ${esc(l.notes)}</p>` : ''}
+          ${l.homework ? `<p class="text-xs mt-1 text-charge-400">🏠 Homework: ${esc(l.homework)}</p>` : ''}
+        </div>`).join('') || '<p class="text-sm text-mist-500">No lessons yet.</p>'}
+    </div>`;
+}
+
+export interface JourneyData {
+  athlete: { id: string; name: string; dob: string | null; goals: string | null; notes: string | null; medical: string | null; club_id: string; age: number | null };
+  progress: { skill: string; status: string; note: string | null; updated_at: string }[];
+  lessons: { lesson_id: string; status: string; starts_at: string; coach_name: string; notes: string | null; homework: string | null; worked_on: string[]; paid: boolean; price_pence: number }[];
+  stats: { completed: number; achieved: number; working_on: number };
+}
+
+/** Wire the editable journey controls (coach/admin). */
+export function wireJourneyEditing(host: HTMLElement, athleteId: string, reload: () => void) {
+  host.querySelectorAll<HTMLSelectElement>('[data-skill-status]').forEach((sel) =>
+    sel.addEventListener('change', async () => {
+      const { error } = await supabase.rpc('set_progress', { p_athlete: athleteId, p_skill: sel.dataset.skillStatus, p_status: sel.value || null });
+      if (error) return toast(errMsg(error), 'err');
+      toast(sel.value ? 'Progress updated' : 'Skill removed');
+      reload();
+    })
+  );
+  host.querySelector<HTMLFormElement>('[data-add-skill]')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = (e.currentTarget as HTMLFormElement).querySelector('input')!;
+    const { error } = await supabase.rpc('set_progress', { p_athlete: athleteId, p_skill: input.value.trim(), p_status: 'working_on' });
+    if (error) return toast(errMsg(error), 'err');
+    reload();
+  });
+}

@@ -1,7 +1,7 @@
 {
-  "name": "Ignyte Club Manager",
-  "short_name": "Ignyte Club",
-  "description": "Private lesson booking & skill progression for cheer tumble and all-star dance.",
+  "name": "Ignyte 1-2-1",
+  "short_name": "Ignyte 1-2-1",
+  "description": "Private 1-2-1 lesson booking, coach notes and skill progress for cheer & dance clubs.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",

@@ -1,0 +1,161 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+---
+
+<AppLayout title="Coach">
+  <p class="eyebrow">Coach</p>
+  <div class="flex flex-wrap items-center justify-between gap-2 mt-1 mb-4">
+    <h1 class="text-2xl" id="title">Your lessons</h1>
+    <nav class="flex gap-1.5 flex-wrap" id="tabs">
+      <button class="btn btn-ghost btn-sm" data-tab="lessons">📅 Lessons</button>
+      <button class="btn btn-ghost btn-sm" data-tab="availability">🕒 Availability</button>
+      <button class="btn btn-ghost btn-sm" data-tab="athletes">🔥 Athletes</button>
+    </nav>
+  </div>
+  <div id="content"><p class="text-sm text-mist-500">Loading…</p></div>
+
+  <script>
+    import { supabase } from '../lib/supabase';
+    import { requireAuth, schedule, startOfDay, addDays, esc, toast, errMsg, journeyHtml, wireJourneyEditing, ageFromDob, fmtWhen, type Ctx, type JourneyData } from '../lib/app';
+    import { scheduleHtml, wireScheduleActions, addSlotsFormHtml, wireAddSlots } from '../lib/ui';
+
+    const content = document.getElementById('content')!;
+    let ctx: Ctx;
+    let tab = new URLSearchParams(location.search).get('tab') || 'lessons';
+
+    type Person = { id: string; name: string; dob: string | null; parent_name: string | null; own_name: string | null; parent_phone: string | null; own_phone: string | null; medical: string | null; goals: string | null; lessons: number; next: string | null; active: boolean };
+    let people: { athletes: Person[] } | null = null;
+    async function loadPeople() {
+      const { data, error } = await supabase.rpc('club_people', { p_club: ctx.club!.id });
+      if (error) throw error;
+      people = data as { athletes: Person[] };
+      return people;
+    }
+    const athletesForAssign = async () => (await loadPeople()).athletes.filter((a) => a.active).map((a) => ({ id: a.id, name: a.name }));
+    const skillsFor = async (athleteId: string) => {
+      const { data } = await supabase.rpc('athlete_journey', { p_athlete: athleteId });
+      return ((data as JourneyData | null)?.progress ?? []).map((p) => p.skill);
+    };
+
+    function setTab(t: string) {
+      tab = t;
+      document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.classList.toggle('btn-primary', b.dataset.tab === t));
+      history.replaceState(null, '', `?tab=${t}`);
+      render();
+    }
+    document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab!)));
+
+    async function render() {
+      const club = ctx.club!;
+      const me = ctx.profile.id;
+      const opts = { staff: false, coachId: me, currency: club.currency, clubId: club.id, reload: render, athletes: athletesForAssign, skillsFor, onJourney: openJourney };
+      if (tab === 'lessons') {
+        document.getElementById('title')!.textContent = 'Your lessons';
+        const from = addDays(startOfDay(), -14);
+        const rows = (await schedule(club.id, from, addDays(startOfDay(), 15))).filter((r) => r.coach_id === me);
+        const now = Date.now();
+        const needsWrap = rows.filter((r) => r.lesson_status === 'booked' && new Date(r.starts_at).getTime() < now);
+        const todayKey = startOfDay().getTime();
+        const today = rows.filter((r) => { const t = new Date(r.starts_at).getTime(); return t >= todayKey && t < todayKey + 864e5; });
+        const upcoming = rows.filter((r) => new Date(r.starts_at).getTime() >= todayKey + 864e5);
+        content.innerHTML = `
+          ${needsWrap.length ? `<section class="surface-card p-4 mb-4 border-charge-400/40">
+            <h2 class="font-semibold text-charge-400">⏳ Needs wrapping up (${needsWrap.length})</h2>
+            <p class="text-xs text-mist-400 mb-3">Mark attended or no-show and leave a note — families see it straight away.</p>
+            ${scheduleHtml(needsWrap, opts)}
+          </section>` : ''}
+          <section class="surface-card p-4 mb-4">
+            <h2 class="font-semibold mb-3">Today</h2>
+            ${scheduleHtml(today, opts, 'No lessons or open slots today.')}
+          </section>
+          <section class="surface-card p-4">
+            <h2 class="font-semibold mb-3">Next two weeks</h2>
+            ${scheduleHtml(upcoming, opts, 'Nothing booked yet. Add availability so families can book you.')}
+          </section>`;
+        wireScheduleActions(content, rows, opts);
+      } else if (tab === 'availability') {
+        document.getElementById('title')!.textContent = 'Your availability';
+        const rows = (await schedule(club.id, new Date(), addDays(startOfDay(), 60))).filter((r) => r.coach_id === me);
+        const open = rows.filter((r) => !r.lesson_id);
+        content.innerHTML = `
+          <section class="surface-card p-4 mb-4">
+            <h2 class="font-semibold">Add slots</h2>
+            <p class="text-xs text-mist-400 mb-3">Each slot is one 1-2-1 lesson families can book. Add a run of back-to-back slots and repeat it weekly.</p>
+            ${addSlotsFormHtml(null, { minutes: club.lesson_minutes, price_pence: club.lesson_price_pence })}
+          </section>
+          <section class="surface-card p-4">
+            <h2 class="font-semibold mb-3">Open slots · next 60 days <span class="text-mist-500 font-normal text-sm">(${open.length} open, ${rows.length - open.length} booked)</span></h2>
+            ${scheduleHtml(open, opts, 'No open slots. Add some above.')}
+          </section>`;
+        wireAddSlots(content.querySelector('[data-add-slots]')!, club.id, me, render);
+        wireScheduleActions(content, rows, opts);
+      } else {
+        document.getElementById('title')!.textContent = 'Athletes';
+        const p = await loadPeople();
+        const list = p.athletes.filter((a) => a.active);
+        content.innerHTML = `
+          <section class="surface-card p-4">
+            <input class="field mb-3" placeholder="Search athletes…" id="search" />
+            <div class="flex flex-col gap-1.5" id="ath-list">
+              ${list.map((a) => `
+                <div class="rounded-xl bg-ink-900 border border-ink-700 px-3 py-2.5" data-ath="${a.id}" data-name="${esc(a.name.toLowerCase())}">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="flex-1 text-sm"><b>${esc(a.name)}</b> ${a.dob ? `<span class="text-xs text-mist-500">(${ageFromDob(a.dob)})</span>` : ''} ${a.medical ? '<span class="pill pill-warn">🚑</span>' : ''}
+                      <span class="block text-xs text-mist-500">${a.lessons} lesson${a.lessons === 1 ? '' : 's'}${a.next ? ' · next ' + fmtWhen(a.next) : ''}${a.parent_name ? ' · ' + esc(a.parent_name) : ''}</span></span>
+                    <button class="btn btn-ghost btn-sm" data-journey="${a.id}">Progress →</button>
+                  </div>
+                  <div class="j-panel hidden mt-3"></div>
+                </div>`).join('') || '<p class="text-sm text-mist-500">No athletes in the club yet.</p>'}
+            </div>
+          </section>`;
+        document.getElementById('search')!.addEventListener('input', (e) => {
+          const q = (e.target as HTMLInputElement).value.toLowerCase();
+          content.querySelectorAll<HTMLElement>('[data-ath]').forEach((el) => el.classList.toggle('hidden', !el.dataset.name!.includes(q)));
+        });
+        content.querySelectorAll<HTMLButtonElement>('[data-journey]').forEach((b) =>
+          b.addEventListener('click', () => {
+            const panel = content.querySelector<HTMLElement>(`[data-ath="${b.dataset.journey}"] .j-panel`)!;
+            if (!panel.classList.contains('hidden')) return panel.classList.add('hidden');
+            panel.classList.remove('hidden');
+            loadJourney(b.dataset.journey!, panel);
+          })
+        );
+      }
+    }
+
+    async function loadJourney(athleteId: string, panel: HTMLElement) {
+      const { data, error } = await supabase.rpc('athlete_journey', { p_athlete: athleteId });
+      if (error) return toast(errMsg(error), 'err');
+      const j = data as JourneyData;
+      panel.innerHTML = `
+        ${j.athlete.medical ? `<p class="text-xs text-charge-400 mb-2">🚑 ${esc(j.athlete.medical)}</p>` : ''}
+        <form class="flex gap-2 mb-3" data-goal><input class="field flex-1" placeholder="Goal, e.g. Back handspring by Christmas" value="${esc(j.athlete.goals ?? '')}" maxlength="200" /><button class="btn btn-ghost btn-sm">Set goal</button></form>
+        ${journeyHtml(j, { editable: true })}`;
+      wireJourneyEditing(panel, athleteId, () => loadJourney(athleteId, panel));
+      panel.querySelector<HTMLFormElement>('[data-goal]')!.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const goal = (e.currentTarget as HTMLFormElement).querySelector('input')!.value;
+        const { error: ge } = await supabase.rpc('save_athlete', { p_club: j.athlete.club_id, p_id: athleteId, p_name: j.athlete.name, p_dob: j.athlete.dob, p_medical: j.athlete.medical, p_notes: j.athlete.notes, p_goals: goal });
+        if (ge) return toast(errMsg(ge), 'err');
+        toast('Goal saved');
+        loadJourney(athleteId, panel);
+      });
+    }
+
+    function openJourney(athleteId: string) {
+      setTab('athletes');
+      setTimeout(() => {
+        const btn = content.querySelector<HTMLButtonElement>(`[data-journey="${athleteId}"]`);
+        btn?.click();
+        btn?.scrollIntoView({ block: 'center' });
+      }, 600);
+    }
+
+    (async () => {
+      ctx = await requireAuth(['coach']);
+      setTab(tab);
+    })().catch((e) => {
+      if ((e as Error).message !== 'redirecting') toast(errMsg(e), 'err');
+    });
+  </script>
+</AppLayout>
