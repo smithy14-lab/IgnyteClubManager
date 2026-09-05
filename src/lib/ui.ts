@@ -36,8 +36,10 @@ export function rowHtml(r: ScheduleRow, o: RowOpts): string {
     if (isMineToRun) {
       actions += `<button class="btn btn-ghost btn-sm" data-act="info:${r.slot_id}" title="Contact & medical">ℹ️</button>`;
       if (r.lesson_status === 'booked') {
-        actions += `<button class="btn btn-primary btn-sm" data-act="wrap:${r.slot_id}">${past ? '✅ Wrap up' : '✅ Wrap up'}</button>
-          <button class="btn btn-danger btn-sm" data-act="cancel:${r.lesson_id}">Cancel</button>`;
+        // wrap-up once the lesson has started; before that it's cancel-only
+        actions += past
+          ? `<button class="btn btn-primary btn-sm" data-act="wrap:${r.slot_id}">✅ Wrap up</button>`
+          : `<button class="btn btn-danger btn-sm" data-act="cancel:${r.lesson_id}">Cancel</button>`;
       } else {
         actions += `<button class="btn btn-ghost btn-sm" data-act="wrap:${r.slot_id}">✏️ Notes</button>`;
       }
@@ -112,9 +114,14 @@ export interface WireOpts extends RowOpts {
   onJourney?: (athleteId: string) => void;
 }
 
+const wired = new WeakMap<HTMLElement, (e: Event) => void>();
+
 export function wireScheduleActions(host: HTMLElement, rows: ScheduleRow[], o: WireOpts) {
   const byId = new Map(rows.map((r) => [r.slot_id, r]));
-  host.addEventListener('click', async (e) => {
+  // one delegated listener per host — re-rendering must not stack handlers
+  const prev = wired.get(host);
+  if (prev) host.removeEventListener('click', prev);
+  const handler = async (e: Event) => {
     const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!btn || !host.contains(btn)) return;
     e.preventDefault();
@@ -202,7 +209,9 @@ export function wireScheduleActions(host: HTMLElement, rows: ScheduleRow[], o: W
     } catch (err) {
       toast(errMsg(err), 'err');
     }
-  });
+  };
+  wired.set(host, handler);
+  host.addEventListener('click', handler);
 }
 
 /** "Add slots" form used by club (any coach) and coach (self). */

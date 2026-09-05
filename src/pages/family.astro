@@ -100,7 +100,7 @@ import AppLayout from '../layouts/AppLayout.astro';
             <div><label class="form-label">Mobile</label><input class="field" name="phone" type="tel" value="${esc(ctx.profile.phone ?? '')}" /></div>
             <button class="btn btn-ghost btn-sm" type="submit">Save</button>
           </form>
-          <p class="text-xs text-mist-500 mt-2">${esc(ctx.profile.email)} · Club code for other parents: <code class="text-ignite-400">${esc(club.join_code ?? '')}</code></p>
+          <p class="text-xs text-mist-500 mt-2">${esc(ctx.profile.email)} · ${esc(club.name)}</p>
         </section>`;
 
       content.querySelectorAll<HTMLButtonElement>('[data-cancel]').forEach((b) =>

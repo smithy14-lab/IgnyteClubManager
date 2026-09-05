@@ -90,7 +90,8 @@ export async function loadCtx(): Promise<Ctx | null> {
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) return null;
   const { data, error } = await supabase.rpc('my_context');
-  if (error || !data) return null;
+  if (error) throw error;
+  if (!data) return null;
   const raw = data as { profile: Profile; clubs: Club[] };
   const clubs = raw.clubs ?? [];
   const urlClub = new URLSearchParams(location.search).get('club');
@@ -119,7 +120,19 @@ export async function requireAuth(roles?: Role[]): Promise<Ctx> {
       '<div style="padding:4rem 1.5rem;text-align:center;font-family:system-ui"><h1>Not configured</h1><p>Add Supabase env vars and rebuild.</p></div>';
     throw new Error('Supabase not configured');
   }
-  const ctx = await loadCtx();
+  let ctx: Ctx | null = null;
+  try {
+    ctx = await loadCtx();
+  } catch (e) {
+    // Signed in but the app can't load its data — say so rather than bouncing
+    // the person back to the sign-in page with no explanation.
+    document.body.innerHTML =
+      '<div style="padding:4rem 1.5rem;text-align:center;font-family:system-ui;max-width:28rem;margin:auto"><h1 style="font-size:1.3rem">Something went wrong loading your account</h1>' +
+      `<p style="margin-top:1rem;color:#9090a8">${esc(errMsg(e))}</p>` +
+      '<p style="margin-top:1.5rem"><a href="/dashboard" style="color:#ff9248">Try again</a> · <a href="/" id="so" style="color:#ff9248">Sign out</a></p></div>';
+    document.getElementById('so')?.addEventListener('click', () => supabase.auth.signOut());
+    throw new Error('redirecting');
+  }
   if (!ctx) {
     const { data } = await supabase.auth.getSession();
     if (data.session) await supabase.auth.signOut();
